@@ -1,0 +1,9 @@
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - --tag
+      - asia-east1-docker.pkg.dev/echotrail-dev-508500-k6/echotrail/echotrail-backend:$BUILD_ID
+      - .
+images:
+  - asia-east1-docker.pkg.dev/echotrail-dev-508500-k6/echotrail/echotrail-backend:$BUILD_ID
