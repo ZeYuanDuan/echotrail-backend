@@ -6,7 +6,29 @@ steps:
     args:
       - build
       - --tag
-      - asia-east1-docker.pkg.dev/echotrail-dev-508500-k6/echotrail/echotrail-backend:$BUILD_ID
+      - asia-east1-docker.pkg.dev/echotrail-dev-508500-k6/echotrail/echotrail-backend:$COMMIT_SHA
       - .
+
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - asia-east1-docker.pkg.dev/echotrail-dev-508500-k6/echotrail/echotrail-backend:$COMMIT_SHA
+
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - echotrail-backend
+      - --image
+      - asia-east1-docker.pkg.dev/echotrail-dev-508500-k6/echotrail/echotrail-backend:$COMMIT_SHA
+      - --region
+      - asia-east1
+      - --port
+      - "8080"
+      - --service-account
+      - echotrail-backend-runtime@echotrail-dev-508500-k6.iam.gserviceaccount.com
+      - --allow-unauthenticated
+      - --quiet
 images:
-  - asia-east1-docker.pkg.dev/echotrail-dev-508500-k6/echotrail/echotrail-backend:$BUILD_ID
+  - asia-east1-docker.pkg.dev/echotrail-dev-508500-k6/echotrail/echotrail-backend:$COMMIT_SHA

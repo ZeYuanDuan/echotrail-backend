@@ -1,13 +1,21 @@
 # ADR 0001：後端最小部署基線
 
-- Status: Accepted
+- Status: Accepted，2026-09-13 修訂
 - Date: 2026-09-13
 
 ## 目標與限制
 
-EchoTrail Backend 的第一個里程碑是用 TypeScript、Node.js、Fastify 與 Docker 建立可部署至 Cloud Run 的最小服務，並用公開健康檢查驗證建置、啟動及 HTTP 連線。首次部署由 Google Cloud Console 手動執行 Cloud Build；本階段不建立 GitHub branch trigger 或 CI/CD。
+EchoTrail Backend 的第一個里程碑是用 TypeScript、Node.js、Fastify 與 Docker 建立可部署至 Cloud Run 的最小服務，並用公開健康檢查驗證建置、啟動及 HTTP 連線。
 
 登入、資料模型、LLM 與 Dashboard 規則尚未定案，因此本 ADR 不預先把它們寫進程式。
+
+## 修訂決策：`dev` 自動部署
+
+2026-09-13 起，`dev` 分支的變更會觸發 Cloud Build。Cloud Build 以 commit SHA 建置及推送 Docker 映像，然後部署 `asia-east1` 的 Cloud Run service `echotrail-backend`。
+
+Cloud Build trigger 使用的服務帳號必須取得 Cloud Run 部署權限，以及 Cloud Run 執行身分的 Service Account User 權限。此設定由公司帳號在 Google Cloud Console 管理。本機不使用 `gcloud` CLI。
+
+公開存取僅用於目前的 `GET /health`。新增其他路由前，必須重新確認服務的存取控制。
 
 ## 閱讀方式
 
@@ -36,7 +44,7 @@ EchoTrail Backend 的第一個里程碑是用 TypeScript、Node.js、Fastify 與
 - 關鍵假設：本機 Docker 與 GCP CLI 均已正確設定。
 - 可逆性 / 成本：雙向門；數小時。
 
-**已決定：選項 B — Cloud Build 手動觸發，再以映像部署 Cloud Run。** 不建立 GitHub branch trigger。若確認 project 與權限後，Cloud Build 一天內仍無法建置映像，先以選項 A 驗證服務程式，再處理 IAM 或組織政策。
+**原始決策：選項 B — Cloud Build 手動觸發，再以映像部署 Cloud Run。** 此決策已由「修訂決策：`dev` 自動部署」取代。現行流程由 `dev` trigger 建置、推送並部署 Cloud Run。
 
 ## Q02：區域與 Artifact Registry
 

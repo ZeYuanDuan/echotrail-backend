@@ -1,34 +1,22 @@
 # EchoTrail Backend
 
-「曼陀號 PM x ENG 合作專案 EchoTrail」的後端 Repository。
+EchoTrail 的後端服務。
 
-## 技術選型
+## 技術棧
 
-本專案採用 **TypeScript + Node.js + Fastify**，並部署至 Cloud Run。
+本專案使用 TypeScript、Node.js 22 與 Fastify 建立 HTTP API。Docker 產生執行映像。
 
-- 與前端共用 TypeScript 生態系，便於維護 API contract 與協作開發。
-- 適合處理 LLM 串接與串流回覆等 I/O 密集流程。
-- Fastify 內建良好的 schema 驗證、結構化 logging 與 plugin 架構，適合建立可維護的 API。
+## 雲端架構
 
-## 分支規範
+服務與 Artifact Registry 位於 GCP project `echotrail-dev-508500-k6` 的 `asia-east1`。`dev` 分支合併後會觸發 Cloud Build。Cloud Build 建置映像、推送至 Artifact Registry，並部署新的 Cloud Run revision。
 
-- `dev` 是首次部署使用的整合分支。請先將改動推送至個人分支，再透過 Pull Request 合併至 `dev`。
-- 目前的 Cloud Build trigger 採人工執行，來源分支為 `dev`；它不會因為 push、Pull Request 或 tag 自動執行。
-- 未來若要啟用 CI/CD，可保留同一個 trigger，將事件改為 `dev` 的 push。現有 `cloudbuild.yaml` 僅建置及發布映像，尚未包含 Cloud Run 自動部署步驟。
+## 健康檢查
 
-## 首次部署範圍
+目前服務只提供公開的 `GET /health`。成功時回傳 HTTP 200 與 `{"status":"ok"}`。它不連線資料庫、LLM 或其他外部服務。
 
-這個里程碑只提供公開的 `GET /health`。成功時回傳 HTTP 200 與：
+## 本機開發
 
-```json
-{"status":"ok"}
-```
-
-它不會連線資料庫、LLM 或其他外部服務，也不包含登入或業務 API。
-
-## Local development
-
-需要 Node.js 22 LTS。安裝依賴、執行測試與啟動服務：
+需要 Node.js 22。執行下列指令啟動服務並驗證端點：
 
 ```bash
 npm ci
@@ -38,42 +26,9 @@ npm start
 curl --fail http://127.0.0.1:8080/health
 ```
 
-服務預設監聽 `0.0.0.0:8080`；若平台提供 `PORT` 環境變數，會優先使用該值。
+## 開發注意事項
 
-## Docker validation
-
-```bash
-docker build --tag echotrail-backend:local .
-docker run --rm --publish 8080:8080 echotrail-backend:local
-curl --fail http://127.0.0.1:8080/health
-```
-
-第二個指令會持續執行；請在另一個終端呼叫 `curl`，完成後以 `Ctrl-C` 停止容器。
-
-## Manual Google Cloud Console deployment
-
-這是首次手動部署流程；目前**不**建立 GitHub branch 的 push、pull request 或 tag trigger，也不使用本機 `gcloud` CLI。
-
-1. 以公司帳號登入 [Google Cloud Console](https://console.cloud.google.com/)，選擇 project `echotrail-dev-508500-k6`。
-2. 依 Console 提示啟用 Cloud Build、Artifact Registry 與 Cloud Run API。
-3. 開啟 **Artifact Registry → Repositories**。若 `echotrail` 不存在，選擇 **Create repository**，填入：
-   - Name: `echotrail`
-   - Format: **Docker**
-   - Mode: **Standard**
-   - Location type: **Region**
-   - Region: **asia-east1**
-4. 確認本分支已合併並推送至 `dev` 後，在 **Cloud Build → Triggers** 建立人工 trigger：Region 選 `asia-east1`，Event 選 **Manual invocation**，來源選此 repository 的 `dev` 分支（分支欄位填 `dev`），設定檔選 repository 根目錄的 `cloudbuild.yaml`。不要設定 push、pull request 或 tag event。
-5. 在 trigger 列表選擇 **Run trigger**，確認來源分支為 `dev`，再執行建置。等待狀態為 **SUCCESS**，並從結果頁複製輸出的映像 URI。
-6. 開啟 **Cloud Run → Services → Deploy container**，選擇 **Deploy one revision from an existing container image**，貼上 Cloud Build 的映像 URI。
-7. Service name 填 `echotrail-backend`，Region 選 **asia-east1**，Authentication 選 **Allow public access**，然後建立服務。
-8. 部署完成後，在瀏覽器開啟 `<Cloud Run service URL>/health`，確認得到 HTTP 200 與 `{"status":"ok"}`。
-
-Cloud Build 會把映像發布到：
-
-```text
-asia-east1-docker.pkg.dev/echotrail-dev-508500-k6/echotrail/echotrail-backend:<build-id>
-```
-
-若 Console 顯示缺少權限，請向公司 project 管理員申請，不要以個人帳號、服務帳號金鑰、Cloud Shell 或本機 `gcloud` CLI 繞過權限。
-
-相關 Console 說明可參考 Google Cloud 官方文件：[建立 Artifact Registry repository](https://cloud.google.com/artifact-registry/docs/repositories/create-repos)、[使用 Cloud Build 建置容器](https://cloud.google.com/build/docs/building/build-containers)、[從既有映像部署 Cloud Run](https://cloud.google.com/run/docs/deploying)。
+- 將改動透過 Pull Request 合併到 `dev`。不要在未驗證的分支變更部署設定。
+- Cloud Build 使用 commit SHA 作為映像標籤。Cloud Run revision 會固定使用該次部署的映像版本。
+- 若部署因 IAM 失敗，請由 project 管理員檢查 Cloud Build trigger 使用的服務帳號權限。不要使用本機 `gcloud` CLI 或服務帳號金鑰繞過權限。
+- 新增公開路由前，先確認認證與授權需求。`/health` 是目前唯一允許公開存取的端點。
