@@ -62,7 +62,7 @@ curl --fail http://127.0.0.1:8080/health
    - Mode: **Standard**
    - Location type: **Region**
    - Region: **asia-east1**
-4. 確認本分支已合併並推送至 `dev` 後，在 **Cloud Build → Triggers** 建立人工 trigger：Region 選 `asia-east1`，Event 選 **Manual invocation**，來源選此 repository 的 `dev` 分支（branch regex：`^dev$`），設定檔選 repository 根目錄的 `cloudbuild.yaml`。不要設定 push、pull request 或 tag event。
+4. 確認本分支已合併並推送至 `dev` 後，在 **Cloud Build → Triggers** 建立人工 trigger：Region 選 `asia-east1`，Event 選 **Manual invocation**，來源選此 repository 的 `dev` 分支（分支欄位填 `dev`），設定檔選 repository 根目錄的 `cloudbuild.yaml`。不要設定 push、pull request 或 tag event。
 5. 在 trigger 列表選擇 **Run trigger**，確認來源分支為 `dev`，再執行建置。等待狀態為 **SUCCESS**，並從結果頁複製輸出的映像 URI。
 6. 開啟 **Cloud Run → Services → Deploy container**，選擇 **Deploy one revision from an existing container image**，貼上 Cloud Build 的映像 URI。
 7. Service name 填 `echotrail-backend`，Region 選 **asia-east1**，Authentication 選 **Allow public access**，然後建立服務。
