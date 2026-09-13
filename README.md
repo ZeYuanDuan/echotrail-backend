@@ -12,8 +12,9 @@
 
 ## 分支規範
 
-- `dev` 會觸發持續部署（Continuous Deployment）。
-- 請先將改動推送至個人分支，再透過 Pull Request 合併至 `dev`。
+- `dev` 是首次部署使用的整合分支。請先將改動推送至個人分支，再透過 Pull Request 合併至 `dev`。
+- 目前的 Cloud Build trigger 採人工執行，來源分支為 `dev`；它不會因為 push、Pull Request 或 tag 自動執行。
+- 未來若要啟用 CI/CD，可保留同一個 trigger，將事件改為 `dev` 的 push。現有 `cloudbuild.yaml` 僅建置及發布映像，尚未包含 Cloud Run 自動部署步驟。
 
 ## 首次部署範圍
 
@@ -61,10 +62,11 @@ curl --fail http://127.0.0.1:8080/health
    - Mode: **Standard**
    - Location type: **Region**
    - Region: **asia-east1**
-4. 在 **Cloud Build** 建立或執行一個**人工觸發**的 build，來源為本 repository 的指定 revision，設定檔選 repository 根目錄的 `cloudbuild.yaml`。不要設定 push、pull request 或 tag event。等待狀態為 **SUCCESS**，並從結果頁複製輸出的映像 URI。
-5. 開啟 **Cloud Run → Services → Deploy container**，選擇 **Deploy one revision from an existing container image**，貼上 Cloud Build 的映像 URI。
-6. Service name 填 `echotrail-backend`，Region 選 **asia-east1**，Authentication 選 **Allow public access**，然後建立服務。
-7. 部署完成後，在瀏覽器開啟 `<Cloud Run service URL>/health`，確認得到 HTTP 200 與 `{"status":"ok"}`。
+4. 確認本分支已合併並推送至 `dev` 後，在 **Cloud Build → Triggers** 建立人工 trigger：Region 選 `asia-east1`，Event 選 **Manual invocation**，來源選此 repository 的 `dev` 分支（branch regex：`^dev$`），設定檔選 repository 根目錄的 `cloudbuild.yaml`。不要設定 push、pull request 或 tag event。
+5. 在 trigger 列表選擇 **Run trigger**，確認來源分支為 `dev`，再執行建置。等待狀態為 **SUCCESS**，並從結果頁複製輸出的映像 URI。
+6. 開啟 **Cloud Run → Services → Deploy container**，選擇 **Deploy one revision from an existing container image**，貼上 Cloud Build 的映像 URI。
+7. Service name 填 `echotrail-backend`，Region 選 **asia-east1**，Authentication 選 **Allow public access**，然後建立服務。
+8. 部署完成後，在瀏覽器開啟 `<Cloud Run service URL>/health`，確認得到 HTTP 200 與 `{"status":"ok"}`。
 
 Cloud Build 會把映像發布到：
 
