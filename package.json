@@ -7,8 +7,9 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "start": "node dist/server.js",
-    "dev": "tsx watch src/server.ts",
-    "test": "vitest run"
+    "dev": "tsx watch --env-file=.env.local src/server.ts",
+    "test": "vitest run",
+    "test:gemini": "tsx scripts/test-demo.ts"
   },
   "dependencies": { "fastify": "^5.12.4" },
   "devDependencies": {
