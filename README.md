@@ -10,19 +10,24 @@ EchoTrail 的後端服務。
 
 服務與 Artifact Registry 位於 GCP project `echotrail-dev-508500-k6` 的 `asia-east1`。`dev` 分支合併後會觸發 Cloud Build。Cloud Build 建置映像、推送至 Artifact Registry，並部署新的 Cloud Run revision。
 
-## 健康檢查
+## API
 
-目前服務只提供公開的 `GET /health`。成功時回傳 HTTP 200 與 `{"status":"ok"}`。它不連線資料庫、LLM 或其他外部服務。
+- `GET /health`：公開健康檢查。
+- `POST /api/llm/chat`：接收交替的多輪對話，回傳艾可的下一則回覆。
+- `POST /api/llm/insight`：從完整對話產生 grounded Echo Card 與 Dashboard 訊號。
+
+LLM 路由需要服務端環境變數 `GEMINI_API_KEY`；可用 `GEMINI_MODEL` 覆寫模型。金鑰不得放入前端或提交至 Git。產卡 API 會驗證卡片引證與所有圖表訊號的 `evidenceQuote` 都是使用者原文的連續片段，格式或 grounding 不合格時會將失敗 JSON 與具體驗證原因回饋給模型，最多修正重試兩次。
 
 ## 本機開發
 
-需要 Node.js 22。執行下列指令啟動服務並驗證端點：
+需要 Node.js 22。複製環境範例、填入服務端 Gemini 金鑰，再啟動服務：
 
 ```bash
+cp .env.example .env.local
 npm ci
 npm test
 npm run build
-npm start
+npm run dev
 curl --fail http://127.0.0.1:8080/health
 ```
 
