@@ -113,6 +113,7 @@ describe('LLM input and grounded output', () => {
 
     expect(result.card.quote).toBe('我很有成就感');
     expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[1]?.[1]?.signal).toBe(fetchMock.mock.calls[0]?.[1]?.signal);
     const retryRequest = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body)) as {
       contents: Array<{ role: string; parts: Array<{ text: string }> }>;
     };

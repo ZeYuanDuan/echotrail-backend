@@ -133,6 +133,7 @@ const requestGemini = async (
   systemInstruction: string,
   messages: ChatMessage[],
   json = false,
+  signal = AbortSignal.timeout(25_000),
 ): Promise<string> => {
   try {
     const response = await fetch(
@@ -148,7 +149,7 @@ const requestGemini = async (
             ...(json ? { responseMimeType: 'application/json', temperature: 0.2 } : {}),
           },
         }),
-        signal: AbortSignal.timeout(25_000),
+        signal,
       },
     );
     const data = (await response.json()) as GeminiResponse;
@@ -159,7 +160,7 @@ const requestGemini = async (
     return parseText(data);
   } catch (error) {
     if (error instanceof LlmError) throw error;
-    if (error instanceof Error && error.name === 'TimeoutError') {
+    if (signal.aborted || (error instanceof Error && error.name === 'TimeoutError')) {
       throw new LlmError(504, '模型回覆逾時，請重試。');
     }
     throw new LlmError(502, '暫時無法連線模型服務。');
@@ -353,8 +354,9 @@ export class GeminiClient implements LlmClient {
         ? [{ role: 'user' as const, text: '請根據以上逐字稿產生結構化洞察 JSON。這句系統觸發文字不可作為證據。' }]
         : []),
     ];
+    const signal = AbortSignal.timeout(25_000);
     let retryMessages = requestMessages;
-    let raw = await requestGemini(this.config, insightPrompt, retryMessages, true);
+    let raw = await requestGemini(this.config, insightPrompt, retryMessages, true, signal);
     for (let attempt = 0; attempt < 3; attempt += 1) {
       try {
         return parseInsight(raw, messages);
@@ -373,7 +375,7 @@ export class GeminiClient implements LlmClient {
           { role: 'model', text: raw },
           { role: 'user', text: correction },
         ];
-        raw = await requestGemini(this.config, insightPrompt, retryMessages, true);
+        raw = await requestGemini(this.config, insightPrompt, retryMessages, true, signal);
       }
     }
     throw new LlmError(502, '模型產出未通過 grounding 驗證。');
