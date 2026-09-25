@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { setTimeout } from 'node:timers/promises';
 import { Pool } from 'pg';
 import { applyMigrations } from '../src/migrate.js';
 import { fileURLToPath } from 'node:url';
@@ -15,6 +16,17 @@ export async function createTestDatabase(migrate = true): Promise<{ pool: Pool; 
   const name = `echotrail_test_${randomUUID().replace(/-/g, '')}`;
   if (!/^[a-z0-9_]+$/.test(name)) throw new Error('Invalid test database name');
   await admin.query(`CREATE DATABASE ${name}`);
+  async function dropDatabase(): Promise<void> {
+    // pg-pool can finish end() before PostgreSQL observes the socket closing.
+    const deadline = Date.now() + 5000;
+    while (true) {
+      const { rows } = await admin.query('SELECT count(*)::int AS count FROM pg_stat_activity WHERE datname = $1', [name]);
+      if (rows[0]?.count === 0) break;
+      if (Date.now() >= deadline) throw new Error(`Timed out waiting for test database ${name} connections to close`);
+      await setTimeout(20);
+    }
+    await admin.query(`DROP DATABASE ${name}`);
+  }
   const testUrl = new URL(url);
   testUrl.pathname = `/${name}`;
   const pool = new Pool({ connectionString: testUrl.toString() });
@@ -26,16 +38,16 @@ export async function createTestDatabase(migrate = true): Promise<{ pool: Pool; 
     }
   } catch (error) {
     await pool.end();
-    await admin.query(`DROP DATABASE ${name} WITH (FORCE)`);
-    await admin.end();
+    try { await dropDatabase(); }
+    finally { await admin.end(); }
     throw error;
   }
   return {
     pool,
     close: async () => {
       await pool.end();
-      await admin.query(`DROP DATABASE ${name} WITH (FORCE)`);
-      await admin.end();
+      try { await dropDatabase(); }
+      finally { await admin.end(); }
     },
   };
 }
