@@ -1,6 +1,6 @@
 # Cloud SQL：接上 Cloud Run 與 Migration
 
-這份文件從**資料庫已建立**的狀態開始。照順序完成帳號、權限與 Secret Manager 設定；最後才讓 Cloud Build 執行 migration 並部署後端。這裡的「migration」是建立或更新資料表的版本化 SQL，不是搬移 Cloud SQL instance。
+本專案只使用**一個 PostgreSQL 登入帳號** `echotrail_app`。Cloud Run migration job 和後端 service 都使用現有的 `echotrail-backend-runtime` GCP 服務帳號、同一個資料庫密碼 Secret。這個資料庫帳號可以建立資料表，也可以讀寫應用資料；對一次性的工程展示已足夠。它**不使用**現有的 `postgres` 管理帳號。
 
 ## 目前現況（2026-09-25 唯讀 `gcloud` 查詢）
 
@@ -8,113 +8,90 @@
 | --- | --- |
 | GCP 專案 | `echotrail-dev-508500-k6` |
 | Cloud SQL | `echotrail-postgres`，`asia-east1`，PostgreSQL 18，狀態 `RUNNABLE`；連線名稱 `echotrail-dev-508500-k6:asia-east1:echotrail-postgres` |
-| 資料庫 | `echotrail` 已建立；資料庫使用者目前只有 `postgres` |
-| Cloud Run service | `echotrail-backend` 已部署，執行身分為 `echotrail-backend-runtime@echotrail-dev-508500-k6.iam.gserviceaccount.com`；目前**沒有** Cloud SQL 連線設定 |
-| Gemini secret | `echotrail-gemini-api-key` 已存在，後端執行身分已有讀取權限；後續部署須保留這項設定 |
-| Cloud Build | `asia-east1` 的 `echotrail-backend-build` trigger 監看 `dev`，讀取 `cloudbuild.yaml`；建置身分已有 Cloud Run Admin、Artifact Registry Writer，以及使用現有後端執行身分的權限 |
-| Migration | 尚無 migration job、SQL migration、資料庫密碼 secrets；目前 `cloudbuild.yaml` 只有建置、推送映像、部署服務三步 |
+| 資料庫 | `echotrail` 已建立；登入使用者 `echotrail_app` 已建立。`gcloud sql users list` 無法證明該使用者在 PostgreSQL 內的角色與 schema 權限，須依步驟 1 到 Cloud SQL Studio 查證。 |
+| Cloud Run service | `echotrail-backend` 已部署，執行身分為 `echotrail-backend-runtime@echotrail-dev-508500-k6.iam.gserviceaccount.com`；目前沒有 Cloud SQL 連線設定，環境變數只有既有的 `GEMINI_API_KEY`。 |
+| Cloud Build | `asia-east1` 的 `echotrail-backend-build` trigger 監看 `dev`，使用 `echotrail-backend-build@echotrail-dev-508500-k6.iam.gserviceaccount.com`；該身分已有 Cloud Run Admin、Artifact Registry Writer，以及使用現有後端執行身分的權限。 |
+| Secret 與 IAM | `echotrail-db-password` 已有一個啟用的版本；現有後端執行身分已有該 Secret 的 Secret Accessor 與專案的 Cloud SQL Client。既有 `echotrail-gemini-api-key` 也有啟用版本。 |
+| Migration | 目前雲端尚無 migration job；本分支的 `cloudbuild.yaml` 已加入 runner 與部署門檻，尚未觸發 `dev` 建置。 |
 
-本機 `gcloud` 的**預設專案不是 EchoTrail**。自行查詢或下指令時，請明確指定 `--project=echotrail-dev-508500-k6`；Console 右上角也先確認目前專案。
+本機 `gcloud` 的預設專案不是 EchoTrail。自行下指令時請明確指定 `--project=echotrail-dev-508500-k6`；Console 右上角也先確認專案。
 
-## 先理解四種身分
-
-| 身分 | 做什麼 | 需要什麼 |
-| --- | --- | --- |
-| `echotrail-backend-build@...` | Cloud Build 部署 job 和 service | 已有 Cloud Run Admin、Artifact Registry Writer；還要能使用新建的 migration 執行身分 |
-| `echotrail-db-migrator@...` | Cloud Run **job** 執行 migration | Cloud SQL Client、讀取 migration 密碼 secret |
-| `echotrail-backend-runtime@...` | Cloud Run **service** 處理前端 API | Cloud SQL Client、讀取應用密碼 secret；現有 Gemini secret 權限保留 |
-| PostgreSQL 的 `echotrail_migrator` / `echotrail_app` | 真正登入資料庫 | 前者建表，後者只讀寫業務資料；兩者使用不同密碼 |
-
-**IAM 的 Cloud SQL Client 只准許服務連到 instance；PostgreSQL 帳號和資料表權限是另一層。** 兩層都完成，程式才能讀寫資料。[Cloud Run 連接 Cloud SQL 的權限說明](https://docs.cloud.google.com/sql/docs/postgres/connect-run)。
-
-## 步驟 1：準備兩個 PostgreSQL 權限角色
+## 步驟 1：檢查已建立的資料庫帳號
 
 1. Console 選 `echotrail-dev-508500-k6` → **Cloud SQL** → `echotrail-postgres` → **Cloud SQL Studio**。
 2. 以資料庫 `echotrail`、使用者 `postgres` 和你建立 instance 時設定的密碼登入。
-3. 執行下列 SQL **一次**。它建立兩個不登入的權限角色：migration 角色可在 `public` schema 建表，應用角色只能使用該 schema。
+3. `echotrail_app` 已存在，不要重新建立。先查自訂權限角色是否存在：
 
 ```sql
-CREATE ROLE echotrail_migration_role NOLOGIN;
-CREATE ROLE echotrail_app_role NOLOGIN;
-
-GRANT CONNECT ON DATABASE echotrail TO echotrail_migration_role, echotrail_app_role;
-GRANT USAGE, CREATE ON SCHEMA public TO echotrail_migration_role;
-GRANT USAGE ON SCHEMA public TO echotrail_app_role;
+SELECT rolname, rolcanlogin FROM pg_roles
+WHERE rolname IN ('echotrail_app', 'echotrail_db_role', 'cloudsqlsuperuser');
 ```
 
-如果角色已存在，不要重新執行 `CREATE ROLE`；先在 Cloud SQL Studio 查 `SELECT rolname FROM pg_roles WHERE rolname LIKE 'echotrail_%';`。Cloud SQL Studio 可以用 PostgreSQL 帳號執行 SQL。[Cloud SQL Studio 使用說明](https://docs.cloud.google.com/sql/docs/postgres/manage-data-using-studio)。
-
-## 步驟 2：建立兩個資料庫登入帳號
-
-1. 在同一個 instance 的 **Users → Add user account**，選 **Built-in authentication**。
-2. 建立 `echotrail_migrator`，設定一組新密碼；在 **Database roles** 指派 `echotrail_migration_role`。
-3. 再建立 `echotrail_app`，設定另一組新密碼；只指派 `echotrail_app_role`。
-4. 確認兩個帳號都**沒有** `cloudsqlsuperuser`。Cloud SQL 的 built-in 使用者若未指定自訂角色，預設會得到這個較高權限的角色；因此不要省略第 2、3 步的角色選擇。[Cloud SQL 建立使用者說明](https://docs.cloud.google.com/sql/docs/postgres/create-manage-users)。
-
-可在 Cloud SQL Studio 用 `postgres` 查證，兩筆 `has_cloudsqlsuperuser` 都應為 `false`：
+若缺少 `echotrail_db_role`，才執行下列 SQL **一次**。這個角色只是權限集合，**不是第二個資料庫登入帳號**。
 
 ```sql
-SELECT rolname,
-       pg_has_role(rolname, 'cloudsqlsuperuser', 'member') AS has_cloudsqlsuperuser
-FROM pg_roles
-WHERE rolname IN ('echotrail_migrator', 'echotrail_app');
+CREATE ROLE echotrail_db_role NOLOGIN;
+GRANT CONNECT ON DATABASE echotrail TO echotrail_db_role;
+GRANT USAGE, CREATE ON SCHEMA public TO echotrail_db_role;
 ```
 
-回到 Cloud SQL Studio，以 `echotrail_migrator` 登入 `echotrail`，執行以下 SQL。它讓**之後由 migration 建立的表格與序號**自動授權給應用角色；不需要在每次新增表格後手動授權。
+4. 無論角色剛建立或原本就存在，以下 `GRANT` 都可重複執行；它會確保角色有連線與建表權，並授予現有的 `echotrail_app`：
 
 ```sql
-ALTER DEFAULT PRIVILEGES IN SCHEMA public
-  GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO echotrail_app_role;
-ALTER DEFAULT PRIVILEGES IN SCHEMA public
-  GRANT USAGE, SELECT ON SEQUENCES TO echotrail_app_role;
+GRANT CONNECT ON DATABASE echotrail TO echotrail_db_role;
+GRANT USAGE, CREATE ON SCHEMA public TO echotrail_db_role;
+GRANT echotrail_db_role TO echotrail_app;
 ```
 
-這兩段必須以 `echotrail_migrator` 執行，因為 migration 將以它的身分建表。若未來發現已建的表格缺少權限，再以此帳號補執行 `GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO echotrail_app_role;` 和 `GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO echotrail_app_role;`。
+若目前已指派 `cloudsqlsuperuser`，這次工程展示仍可執行 migration；若要縮小權限，再到 **Users → echotrail_app → Database roles** 調整。[Cloud SQL 建立使用者說明](https://docs.cloud.google.com/sql/docs/postgres/create-manage-users)。
 
-## 步驟 3：將兩組密碼放入 Secret Manager
+可回到 Cloud SQL Studio，以 `postgres` 查證結果：
 
-到 **Security → Secret Manager → Create secret**，分別建立：
+```sql
+SELECT pg_has_role('echotrail_app', 'echotrail_db_role', 'member') AS has_db_role,
+       pg_has_role('echotrail_app', 'cloudsqlsuperuser', 'member') AS has_cloudsqlsuperuser;
+```
 
-| Secret 名稱 | Secret 值 | 唯一應授權讀取的執行身分 |
-| --- | --- | --- |
-| `echotrail-db-migration-password` | `echotrail_migrator` 的資料庫密碼 | `echotrail-db-migrator@echotrail-dev-508500-k6.iam.gserviceaccount.com` |
-| `echotrail-db-app-password` | `echotrail_app` 的資料庫密碼 | `echotrail-backend-runtime@echotrail-dev-508500-k6.iam.gserviceaccount.com` |
+至少確認 `has_db_role = true`。`has_cloudsqlsuperuser` 表示是否有額外管理權，這次展示不以它為部署門檻。因為同一個 `echotrail_app` 會建立並持有 migration 產生的表格，它本身就能讀寫那些表，不需要另做預設權限轉授。[Cloud SQL Studio 使用說明](https://docs.cloud.google.com/sql/docs/postgres/manage-data-using-studio)。
 
-先建立 secret 與第一個版本；下一步建立 migration 服務帳號後，再到各 secret 的 **Permissions / Grant access** 授予對應身分 **Secret Manager Secret Accessor** (`roles/secretmanager.secretAccessor`)。不要把密碼寫進 Git、`cloudbuild.yaml` 或前端程式。[Cloud Run job 使用 secrets](https://docs.cloud.google.com/run/docs/configuring/jobs/secrets)、[Cloud Run service 使用 secrets](https://docs.cloud.google.com/run/docs/configuring/services/secrets)。
+## 步驟 2：核對已建立的資料庫密碼 Secret
 
-## 步驟 4：補齊 GCP IAM 權限
+`echotrail-db-password` 已建立且版本 1 為 `ENABLED`，不需要再建立。到 **Security → Secret Manager → echotrail-db-password** 確認它存的是 `echotrail_app` 目前的密碼；`gcloud` 唯讀查詢只能確認 Secret 版本狀態，不能證明密碼與資料庫一致。不要把密碼寫進 Git、`cloudbuild.yaml` 或前端程式。
 
-在 **IAM & Admin → Service Accounts** 建立 `echotrail-db-migrator`，電子郵件應為 `echotrail-db-migrator@echotrail-dev-508500-k6.iam.gserviceaccount.com`。接著依表操作：
+現有的 `echotrail-gemini-api-key` 已被後端使用，請保留；不需要為 migration 再建立另一份資料庫密碼。[Cloud Run 使用 Secret Manager](https://docs.cloud.google.com/run/docs/configuring/services/secrets)。
 
-| 在哪裡授權 | 授權對象 | 角色 |
-| --- | --- | --- |
-| **IAM & Admin → IAM → Grant access** | `echotrail-backend-runtime@...` | **Cloud SQL Client** (`roles/cloudsql.client`) |
-| **IAM & Admin → IAM → Grant access** | `echotrail-db-migrator@...` | **Cloud SQL Client** (`roles/cloudsql.client`) |
-| **Secret Manager → `echotrail-db-app-password` → Permissions** | `echotrail-backend-runtime@...` | **Secret Manager Secret Accessor** |
-| **Secret Manager → `echotrail-db-migration-password` → Permissions** | `echotrail-db-migrator@...` | **Secret Manager Secret Accessor** |
-| **Service Accounts → `echotrail-db-migrator` → Permissions / Grant access** | `echotrail-backend-build@...` | **Service Account User** (`roles/iam.serviceAccountUser`) |
+## 步驟 3：核對已授予的 IAM 權限
 
-目前建置身分已有 Cloud Run Admin、Artifact Registry Writer，以及對既有後端執行身分的 Service Account User；不用重新建立建置身分或授予重複角色。`echotrail-gemini-api-key` 也已授權給後端執行身分，請勿移除。
+以下權限已授予**現有**的 `echotrail-backend-runtime@echotrail-dev-508500-k6.iam.gserviceaccount.com`，不需要重複新增：
 
-## 步驟 5：把 migration 接進 Cloud Build，然後才部署
+| Console 位置 | 授予角色 |
+| --- | --- |
+| **IAM & Admin → IAM → Grant access** | **Cloud SQL Client** (`roles/cloudsql.client`) |
+| **Secret Manager → `echotrail-db-password` → Permissions / Grant access** | **Secret Manager Secret Accessor** (`roles/secretmanager.secretAccessor`) |
 
-**目前還不能直接執行 migration。** 現有 [`cloudbuild.yaml`](../cloudbuild.yaml) 只把 Cloud SQL instance 附加到即將部署的 service；映像內沒有 migration runner，也沒有將資料庫密碼接入 job/service。請先照 [migration 實作計畫](superpowers/plans/2026-09-25-cloud-build-migrations.md) 完成程式碼、版本化 SQL、Dockerfile 與 Cloud Build 步驟，再推送觸發 `dev` 建置。預期的順序是：
+Cloud SQL Client 讓 Cloud Run 連到 instance；PostgreSQL 的 `echotrail_app` 帳號才負責登入資料庫。Migration job 和後端 service 都使用同一個 GCP 執行身分，因此只需授權一次。現有 Cloud Build 身分已能使用它，不必新增 migration 服務帳號，也不必再授予 Service Account User。[Cloud Run 連接 Cloud SQL](https://docs.cloud.google.com/sql/docs/postgres/connect-run)。
+
+## 步驟 4：把 migration 接進 Cloud Build
+
+本分支已加入版本化 SQL、runner、Dockerfile 與 Cloud Build 門檻。先完成上述資料庫角色與密碼核對，再透過 PR 合併 `dev` 觸發建置。流程是：
 
 ```text
 建置並推送同一個映像
   → 建立本次 build 專屬的 Cloud Run migration job（et-mig-$BUILD_ID）
-  → job 使用 echotrail_migrator，執行尚未套用的 SQL migration
+  → job 以 echotrail-backend-runtime + echotrail_app 執行尚未套用的 SQL
   → Cloud Build 等 job 成功（--wait）
-  → 部署 echotrail-backend service，使用 echotrail_app
+  → 部署 echotrail-backend service；同樣使用 echotrail-backend-runtime + echotrail_app
 ```
 
-Migration job 和 service 都使用 Cloud SQL Unix socket：`/cloudsql/echotrail-dev-508500-k6:asia-east1:echotrail-postgres`。job 用 `echotrail-db-migration-password`，service 用 `echotrail-db-app-password`，都透過 `PGPASSWORD` secret 環境變數注入。Cloud Build 的部署指令要保留原本的 `GEMINI_API_KEY` secret；更新服務 secret 時使用 `--update-secrets`，避免覆蓋既有設定。若 migration 失敗，Cloud Build 必須停止，不能繼續部署新 service。不要為了測試而手動把 `001_initial_schema.sql` 貼到 Cloud SQL Studio：那樣會繞過版本紀錄，下一次 job 無法可靠判斷哪些 migration 已套用。
+Job 和 service 都透過 Cloud SQL Unix socket `/cloudsql/echotrail-dev-508500-k6:asia-east1:echotrail-postgres` 連線；兩者的 `PGUSER` 都是 `echotrail_app`，`PGPASSWORD` 都從 `echotrail-db-password` Secret 注入。後端部署時要保留原本的 `GEMINI_API_KEY` Secret，加入資料庫 Secret 時使用 `--update-secrets`。若 migration 失敗，Cloud Build 必須停止，不能繼續部署新 service。不要手動把 migration SQL 貼到 Cloud SQL Studio 執行，否則會繞過版本紀錄。
 
-## 步驟 6：部署後怎麼確認
+## 步驟 5：部署後確認
 
-1. **Cloud Build → History**：確認本次 build 依序出現建置、推送、migration job、等待執行、部署 service，且 migration step 成功。
-2. **Cloud Run → Jobs**：找到該次 `et-mig-...`，確認最新 execution 成功。失敗時先看 job log；舊 service 應仍可使用。
-3. **Cloud SQL → `echotrail-postgres` → Cloud SQL Studio**：登入 `echotrail`，執行 `SELECT version, applied_at FROM schema_migrations ORDER BY version;`，確認初始 migration 有紀錄。再檢查 `users`、`events`、`event_insights`、`dashboard_runs` 等表已建立。
-4. **Cloud Run → `echotrail-backend` → 最新 Revision**：確認 Cloud SQL connection 指向 `echotrail-postgres`，執行身分仍為 `echotrail-backend-runtime@...`，且保留 Gemini secret。`GET /health` 只能證明服務啟動；待持久化 API 完成後，還要實際寫入一張 Echo Card、重新載入 My Trail、再讀回同一筆資料。
+1. **Cloud Build → History**：確認順序為建置、推送、migration job 執行成功、部署 service。
+2. **Cloud Run → Jobs**：確認本次 `et-mig-...` execution 成功。失敗時先看 job log；舊 service 應仍可使用。
+3. **Cloud SQL Studio**：登入 `echotrail`，執行 `SELECT version, applied_at FROM schema_migrations ORDER BY version;`，確認初始 migration 有紀錄，並確認 `users`、`events`、`event_insights`、`dashboard_runs` 等表已建立。
+4. **Cloud Run → `echotrail-backend` → 最新 Revision**：確認 Cloud SQL connection 指向 `echotrail-postgres`，執行身分仍是 `echotrail-backend-runtime@...`，且 `GEMINI_API_KEY` Secret 仍在。呼叫 `GET /health`，再以 `POST /api/users`、`POST /api/events`、`GET /api/events` 做一張卡片的寫讀冒煙測試；重算前的 `GET /api/dashboard` 應為舊快照或 null，明確呼叫 `POST /api/dashboard/rebuild` 成功後再讀取新快照。
 
-已套用的 migration 檔不可直接修改；下一次資料表變更要新增下一個編號的 SQL 檔。重跑同一個建置時，migration runner 應跳過已記錄的版本。[Cloud Build 步驟順序](https://docs.cloud.google.com/build/docs/configuring-builds/configure-build-step-order)、[Cloud Run job 執行與等待](https://docs.cloud.google.com/run/docs/execute/jobs)。
+已套用的 migration 檔不可修改；後續資料表變更要新增下一個編號的 SQL 檔。[Cloud Build 步驟順序](https://docs.cloud.google.com/build/docs/configuring-builds/configure-build-step-order)、[Cloud Run job 的 `--wait`](https://docs.cloud.google.com/run/docs/execute/jobs)。
+
+重跑相同映像會略過已套用的版本；新 migration 失敗時先修正未套用的檔案再重新部署。已套用檔案的 checksum 不可變，後續 migration 須保持舊 service 可運作的向後相容性。調查失敗 job 後，可在 **Cloud Run → Jobs** 刪除舊的成功 `et-mig-*` job；失敗 job 先保留供檢查。
