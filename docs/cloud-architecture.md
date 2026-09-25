@@ -2,7 +2,7 @@
 
 ## 範圍
 
-本文件說明目前後端的建置、部署與執行流程。現階段服務只提供公開健康檢查，不包含資料庫、LLM、登入或其他業務功能。
+本文件說明目前後端的建置、部署與執行流程。服務提供健康檢查，以及將對話與產卡請求送往 Gemini 的 API。目前沒有使用者識別或資料庫讀寫程式碼；Cloud SQL 連線設定與 Console 建立步驟見 [Cloud SQL 設定](cloud-sql-setup.md)。
 
 ## 架構總覽
 
@@ -14,8 +14,8 @@ Cloud Build
 Artifact Registry
         ↓
 Cloud Run
-        ↓
-公開 HTTP API：GET /health
+        ├─ 公開 HTTP API：GET /health、POST /api/llm/chat、POST /api/llm/insight
+        └─ Gemini API；Cloud SQL 連線通道已列入部署設定，資料庫尚未建立
 ```
 
 Artifact Registry 與 Cloud Run 使用相同區域。這可讓部署流程保持單純。
@@ -42,7 +42,7 @@ Artifact Registry 與 Cloud Run 使用相同區域。這可讓部署流程保持
 
 目前 Cloud Run service 允許未驗證請求。這表示公開設定套用於整個 service，而不只套用於 `/health`。
 
-目前唯一的路由是 `GET /health`。新增其他路由前，團隊必須先確認認證與授權設計，再決定是否維持公開存取。
+目前 `GET /health`、`POST /api/llm/chat` 與 `POST /api/llm/insight` 都受整個 Cloud Run service 的公開設定影響。新增含使用者持久資料的路由前，須處理身份識別及資料隔離；單靠使用者名稱無法驗證呼叫者是資料擁有者。
 
 ## 驗證方式
 

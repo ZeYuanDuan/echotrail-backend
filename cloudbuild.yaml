@@ -28,6 +28,10 @@ steps:
       - "8080"
       - --service-account
       - echotrail-backend-runtime@echotrail-dev-508500-k6.iam.gserviceaccount.com
+      - --execution-environment
+      - gen2
+      - --add-cloudsql-instances
+      - echotrail-dev-508500-k6:asia-east1:echotrail-postgres
       - --allow-unauthenticated
       - --quiet
 images:

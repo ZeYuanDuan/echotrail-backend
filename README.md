@@ -10,6 +10,8 @@ EchoTrail 的後端服務。
 
 服務與 Artifact Registry 位於 GCP project `echotrail-dev-508500-k6` 的 `asia-east1`。`dev` 分支合併後會觸發 Cloud Build。Cloud Build 建置映像、推送至 Artifact Registry，並部署新的 Cloud Run revision。
 
+Cloud SQL PostgreSQL 的 Console 建立順序與 Cloud Run 連線設定見 [Cloud SQL 設定](docs/cloud-sql-setup.md)。目前後端尚未加入資料庫讀寫程式碼。
+
 ## API
 
 - `GET /health`：公開健康檢查。
