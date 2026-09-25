@@ -83,6 +83,54 @@ describe('LLM input and grounded output', () => {
     expect(parseInsight(raw, messages).signals[0]?.strength).toBe(8);
   });
 
+  it('does not count whitespace or symbols toward the minimum card quote length', () => {
+    const symbolMessages = [
+      { role: 'user' as const, text: '我 ！。也重視先理解真正的問題。' },
+    ];
+    const raw = JSON.stringify({
+      card: {
+        title: '理解問題',
+        happen: ['完成一次需求探索'],
+        emotion: '有成就感',
+        like: '我在意理解問題',
+        dislike: '我不喜歡直接照單全收',
+        value: '先理解問題再行動',
+        quote: '我 ！。',
+      },
+      signals: [
+        { framework: 'riasec', dimension: 'I', strength: 8, evidenceQuote: '理解真正的問題' },
+      ],
+      dashboard: {
+        ...dashboard,
+        persona: { ...dashboard.persona, quote: '理解真正的問題' },
+      },
+    });
+    expect(() => parseInsight(raw, symbolMessages)).toThrow(LlmError);
+  });
+
+  it('does not count whitespace or symbols toward the minimum evidence quote length', () => {
+    const symbolMessages = [
+      { role: 'user' as const, text: '我 ！。也重視先理解真正的問題。' },
+    ];
+    const raw = JSON.stringify({
+      card: {
+        title: '理解問題',
+        happen: ['完成一次需求探索'],
+        emotion: '有成就感',
+        like: '我在意理解問題',
+        dislike: '我不喜歡直接照單全收',
+        value: '先理解問題再行動',
+        quote: '理解真正的問題',
+      },
+      signals: [{ framework: 'riasec', dimension: 'I', strength: 8, evidenceQuote: '我 ！。' }],
+      dashboard: {
+        ...dashboard,
+        persona: { ...dashboard.persona, quote: '理解真正的問題' },
+      },
+    });
+    expect(() => parseInsight(raw, symbolMessages)).toThrow(LlmError);
+  });
+
   it('gives the failed JSON and validation reason back to Gemini for a targeted retry', async () => {
     const invalidRaw = JSON.stringify({
       card: {

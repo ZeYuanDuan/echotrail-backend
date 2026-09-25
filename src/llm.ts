@@ -70,6 +70,8 @@ const dimensions: Record<Framework, readonly string[]> = {
   ],
 };
 
+const minimumQuoteLength = 4;
+
 const chatPrompt = `你是「艾可」，EchoTrail 產品裡的職涯自我覺察教練。請使用繁體中文與台灣用語。
 
 每次回覆都用自然語言完成三件事，不要使用條列：
@@ -104,6 +106,8 @@ dashboard 規則：
 - keywords：列出 3 到 8 個對話關鍵詞，weight 為 1 到 5 整數。
 - patterns：列出 1 到 3 個可觀察行為模式，每項 evidenceQuote 必須是 user 原文。
 - northStar：primaryAnchor、簡短 tagline、1 到 3 個 desires、一句 bottomLine、1 到 3 個 nextSteps。nextSteps 只能是從對話合理推得的發展方向，不可捏造經歷。
+
+所有 quote 與 evidenceQuote 至少需包含 4 個文字或數字，空白、標點與其他符號不計。
 
 輸出格式：{"card":{"title":"","happen":[""],"emotion":"","like":"","dislike":"","value":"","quote":""},"signals":[{"framework":"riasec","dimension":"I","strength":8,"evidenceQuote":""}],"dashboard":{"persona":{"headline":"","summaries":[""],"quote":""},"anchor":{"primary":"","ability":[""],"motivation":[""],"values":[""]},"keywords":[{"text":"","weight":3}],"patterns":[{"title":"","evidenceQuote":""}],"northStar":{"primaryAnchor":"","tagline":"","desires":[""],"bottomLine":"","nextSteps":[""]}}}`;
 
@@ -196,8 +200,16 @@ export const parseMessages = (body: unknown, requireUserEnding = true): ChatMess
   return messages;
 };
 
-const quotedByUser = (quote: string, messages: ChatMessage[]): boolean =>
-  quote.length > 0 && messages.some((message) => message.role === 'user' && message.text.includes(quote));
+const normalizedQuote = (quote: string): string => quote.trim();
+const isLongEnoughQuote = (quote: string): boolean =>
+  (normalizedQuote(quote).match(/[\p{L}\p{N}]/gu)?.length ?? 0) >= minimumQuoteLength;
+const quotedByUser = (quote: string, messages: ChatMessage[]): boolean => {
+  const normalized = normalizedQuote(quote);
+  return (
+    isLongEnoughQuote(normalized) &&
+    messages.some((message) => message.role === 'user' && message.text.includes(normalized))
+  );
+};
 
 const isTextArray = (value: unknown, minimum = 1, maximum = 3): value is string[] =>
   Array.isArray(value) &&
