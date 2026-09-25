@@ -108,7 +108,7 @@ dashboard 規則：
 
 輸出格式：{"card":{"title":"","happen":[""],"emotion":"","like":"","dislike":"","value":"","quote":""},"signals":[{"framework":"riasec","dimension":"I","strength":8,"evidenceQuote":""}],"dashboard":{"persona":{"headline":"","summaries":[""],"quote":""},"anchor":{"primary":"","ability":[""],"motivation":[""],"values":[""]},"keywords":[{"text":"","weight":3}],"patterns":[{"title":"","evidenceQuote":""}],"northStar":{"primaryAnchor":"","tagline":"","desires":[""],"bottomLine":"","nextSteps":[""]}}}`;
 
-const dashboardPrompt = `你是 EchoTrail 的整體職涯洞察引擎。輸入是使用者全部已確認事件、卡片、逐字訊息及訊號。只以這些資料綜合整體歷史，不捏造經歷。輸出單一 JSON 物件，包含 persona、anchor、keywords、patterns、northStar，結構與單張事件 dashboard 相同。persona.quote 與每個 patterns.evidenceQuote 必須逐字來自 user 訊息，或使用者明確編輯過的卡片 quote。不得使用 model 訊息作為引文。`;
+const dashboardPrompt = `你是 EchoTrail 的整體職涯洞察引擎。輸入是使用者全部已確認事件、卡片、逐字訊息及訊號。只以這些資料綜合整體歷史，不捏造經歷。輸出單一 JSON 物件，最外層必須直接包含 persona、anchor、keywords、patterns、northStar 五個欄位；不要包在 dashboard、card 或其他欄位下。persona 包含 headline、summaries、quote；anchor 包含 primary、ability、motivation、values；keywords 是含 text、weight 的陣列；patterns 是含 title、evidenceQuote 的陣列；northStar 包含 primaryAnchor、tagline、desires、bottomLine、nextSteps。persona.quote 與每個 patterns.evidenceQuote 必須逐字來自 user 訊息，或使用者明確編輯過的卡片 quote。不得使用 model 訊息作為引文。`;
 
 type GeminiResponse = {
   candidates?: Array<{
@@ -207,10 +207,29 @@ const isTextArray = (value: unknown, minimum = 1, maximum = 3): value is string[
   value.length <= maximum &&
   value.every((item) => typeof item === 'string' && item.trim());
 
+const dashboardFields = ['persona', 'anchor', 'keywords', 'patterns', 'northStar'] as const;
+const fieldType = (value: unknown): string =>
+  value === undefined ? 'missing' : value === null ? 'null' : Array.isArray(value) ? 'array' : typeof value;
+
+const dashboardResponseShape = (raw: string): Record<string, unknown> => {
+  let parsed: unknown;
+  try { parsed = JSON.parse(raw.replace(/^```json\s*|\s*```$/g, '')); }
+  catch { return { json: 'invalid' }; }
+  const root = isRecord(parsed) ? parsed : {};
+  const wrapped = isRecord(root.dashboard) ? root.dashboard : {};
+  const types = (value: Record<string, unknown>) =>
+    Object.fromEntries(dashboardFields.map((field) => [field, fieldType(value[field])]));
+  return { root: types(root), dashboard: fieldType(root.dashboard), wrapped: types(wrapped) };
+};
+
 export function parseDashboardProfile(raw: string, evidence: DashboardEvidence[]): InsightResult['dashboard'] {
   let value: unknown;
   try { value = JSON.parse(raw.replace(/^```json\s*|\s*```$/g, '')); }
   catch { throw new LlmError(502, 'Dashboard 模型產出不是有效 JSON。'); }
+  if (isRecord(value)) {
+    const root = value;
+    if (isRecord(root.dashboard) && dashboardFields.every((field) => !(field in root))) value = root.dashboard;
+  }
   if (!isRecord(value) || !isRecord(value.persona) || !isRecord(value.anchor) || !isRecord(value.northStar) ||
     !Array.isArray(value.keywords) || !Array.isArray(value.patterns)) throw new LlmError(502, 'Dashboard 模型產出缺少欄位。');
   const quoted = (quote: unknown): boolean => typeof quote === 'string' && !!quote && evidence.some((event) =>
@@ -407,7 +426,26 @@ export class GeminiClient implements LlmClient {
   }
 
   async synthesizeDashboard(evidence: DashboardEvidence[]): Promise<InsightResult['dashboard']> {
-    const raw = await requestGemini(this.config, dashboardPrompt, [{ role: 'user', text: JSON.stringify(evidence) }], true);
-    return parseDashboardProfile(raw, evidence);
+    let requestMessages: ChatMessage[] = [{ role: 'user', text: JSON.stringify(evidence) }];
+    let raw = await requestGemini(this.config, dashboardPrompt, requestMessages, true);
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        return parseDashboardProfile(raw, evidence);
+      } catch (caught) {
+        if (caught instanceof LlmError && caught.statusCode === 502) {
+          console.warn('Dashboard profile validation failed', { reason: caught.message, shape: dashboardResponseShape(raw) });
+        }
+        if (!(caught instanceof LlmError) || caught.statusCode !== 502 || attempt === 2) {
+          throw caught;
+        }
+        requestMessages = [
+          ...requestMessages,
+          { role: 'model', text: raw },
+          { role: 'user', text: `上一個 JSON 未通過後端驗證：${caught.message} 請只修正 JSON。最外層直接放 persona、anchor、keywords、patterns、northStar；引文只可逐字複製最初 user 訊息或使用者編輯的卡片 quote。這則修正指令不可作為證據。` },
+        ];
+        raw = await requestGemini(this.config, dashboardPrompt, requestMessages, true);
+      }
+    }
+    throw new LlmError(502, 'Dashboard 模型產出未通過驗證。');
   }
 }
