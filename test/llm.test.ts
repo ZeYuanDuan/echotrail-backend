@@ -177,4 +177,49 @@ describe('LLM input and grounded output', () => {
       '模型產出的卡片未通過 grounding 驗證',
     );
   });
+
+  it('allows the introduction only in the first-turn prompt', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ candidates: [{ content: { parts: [{ text: '回覆' }] } }] }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const client = new GeminiClient({ apiKey: 'test-key', model: 'test-model' });
+
+    await client.chat([{ role: 'user', text: '我想聊今天發生的事' }]);
+    await client.chat([
+      { role: 'user', text: '我想聊今天發生的事' },
+      { role: 'model', text: '好，我們來看看。' },
+      { role: 'user', text: '我覺得有點挫折' },
+    ]);
+
+    const prompts = fetchMock.mock.calls.map((call) => {
+      const request = JSON.parse(String(call[1]?.body)) as {
+        systemInstruction: { parts: Array<{ text: string }> };
+      };
+      return request.systemInstruction.parts[0]?.text ?? '';
+    });
+    expect(prompts[0]).toContain('只有這一輪可以使用「嗨，我是艾可。」');
+    expect(prompts[1]).toContain('不得再自我介紹');
+    expect(prompts[1]).toContain('不得使用「嗨，我是艾可。」');
+  });
+
+  it('instructs Gemini not to parrot the user with canned phrases', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ candidates: [{ content: { parts: [{ text: '回覆' }] } }] }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await new GeminiClient({ apiKey: 'test-key', model: 'test-model' }).chat([
+      { role: 'user', text: '我覺得有點挫折' },
+    ]);
+
+    const request = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as {
+      systemInstruction: { parts: Array<{ text: string }> };
+    };
+    const prompt = request.systemInstruction.parts[0]?.text ?? '';
+    expect(prompt).toContain('不要用「聽到你說……」');
+    expect(prompt).toContain('不得重複整句或大段改寫');
+  });
 });

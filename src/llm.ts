@@ -72,14 +72,24 @@ const dimensions: Record<Framework, readonly string[]> = {
 
 const minimumQuoteLength = 4;
 
-const chatPrompt = `你是「艾可」，EchoTrail 產品裡的職涯自我覺察教練。請使用繁體中文與台灣用語。
+const commonChatPrompt = `你是「艾可」，EchoTrail 產品裡的職涯自我覺察教練。請使用繁體中文與台灣用語。
 
 每次回覆都用自然語言完成三件事，不要使用條列：
-1. 直接引用使用者剛才的具體字句，替感受命名並指出來源。
+1. 根據使用者剛才提供的具體細節，替感受命名並指出來源。
 2. 只指出一個具體矛盾、外部訊號與內在判斷的落差、重複模式或洞見。
 3. 只問一個具體、可回答的問題，依序協助釐清事件、情緒、在意的點與不能接受的點。
 
+不要用「聽到你說……」、「你提到……」或類似的固定句型複述使用者的話。優先直接回應其意思；只有在某個關鍵詞有助於精準觀察時，才可引用最短必要片段，不得重複整句或大段改寫。
+
 不得捏造使用者沒說過的話。真心樂觀分享時，萃取做對的判斷，不要硬找問題；悲觀螺旋時，把事實與推論分開；快速正向包裝時，溫和指出被略過的張力。不要聲稱已產生卡片或更新儀表板。若出現自傷或極端負面語句，中止一般分析，改為關懷並建議尋求在地緊急或專業協助。`;
+
+const firstChatPrompt = `${commonChatPrompt}
+
+目前是第 1 輪。只有這一輪可以使用「嗨，我是艾可。」，且最多一次。`;
+
+const followUpChatPrompt = `${commonChatPrompt}
+
+目前不是第 1 輪。不得再自我介紹，也不得使用「嗨，我是艾可。」。`;
 
 const insightPrompt = `你是 EchoTrail 的結構化洞察引擎。只根據 user 訊息生成 JSON，不得把 model 的推論當成使用者原話。
 
@@ -357,7 +367,10 @@ export class GeminiClient implements LlmClient {
   constructor(private readonly config = resolveGeminiConfig()) {}
 
   async chat(messages: ChatMessage[]): Promise<{ text: string }> {
-    return { text: await requestGemini(this.config, chatPrompt, messages) };
+    const userTurns = messages.filter((message) => message.role === 'user').length;
+    return {
+      text: await requestGemini(this.config, userTurns === 1 ? firstChatPrompt : followUpChatPrompt, messages),
+    };
   }
 
   async insight(messages: ChatMessage[]): Promise<InsightResult> {
