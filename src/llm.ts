@@ -5,6 +5,7 @@ export type ChatMessage = {
   text: string;
 };
 
+export const maxMessageLength = 800;
 export type Framework = 'riasec' | 'disc' | 'schein';
 
 export type InsightSignal = {
@@ -178,7 +179,7 @@ export const parseMessages = (body: unknown, requireUserEnding = true): ChatMess
       item.role !== (index % 2 === 0 ? 'user' : 'model') ||
       typeof item.text !== 'string' ||
       !item.text.trim() ||
-      item.text.length > 2000
+      item.text.length > maxMessageLength
     ) {
       throw new LlmError(400, '對話內容或順序錯誤。');
     }

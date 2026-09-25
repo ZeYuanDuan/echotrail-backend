@@ -38,6 +38,13 @@ describe('LLM input and grounded output', () => {
     expect(parseMessages({ messages })).toEqual(messages);
   });
 
+  it('enforces the per-message length limit', () => {
+    expect(parseMessages({ messages: [{ role: 'user', text: '字'.repeat(800) }] })).toHaveLength(1);
+    expect(() =>
+      parseMessages({ messages: [{ role: 'user', text: '字'.repeat(801) }] }),
+    ).toThrow(LlmError);
+  });
+
   it('rejects an invented evidence quote', () => {
     const raw = JSON.stringify({
       card: {
