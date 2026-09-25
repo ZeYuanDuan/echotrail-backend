@@ -3,6 +3,7 @@ options:
 
 steps:
   - name: gcr.io/cloud-builders/docker
+    id: build
     args:
       - build
       - --tag
@@ -10,11 +11,56 @@ steps:
       - .
 
   - name: gcr.io/cloud-builders/docker
+    id: push
     args:
       - push
       - asia-east1-docker.pkg.dev/echotrail-dev-508500-k6/echotrail/echotrail-backend:$COMMIT_SHA
 
   - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    id: migrate-job
+    entrypoint: gcloud
+    args:
+      - run
+      - jobs
+      - deploy
+      - et-mig-$BUILD_ID
+      - --image
+      - asia-east1-docker.pkg.dev/echotrail-dev-508500-k6/echotrail/echotrail-backend:$COMMIT_SHA
+      - --region
+      - asia-east1
+      - --command
+      - node
+      - --args
+      - dist/migrate.js
+      - --tasks
+      - "1"
+      - --max-retries
+      - "0"
+      - --service-account
+      - echotrail-backend-runtime@echotrail-dev-508500-k6.iam.gserviceaccount.com
+      - --set-cloudsql-instances
+      - echotrail-dev-508500-k6:asia-east1:echotrail-postgres
+      - --set-env-vars
+      - PGHOST=/cloudsql/echotrail-dev-508500-k6:asia-east1:echotrail-postgres,PGPORT=5432,PGDATABASE=echotrail,PGUSER=echotrail_app
+      - --set-secrets
+      - PGPASSWORD=echotrail-db-password:latest
+      - --quiet
+
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    id: migrate
+    entrypoint: gcloud
+    args:
+      - run
+      - jobs
+      - execute
+      - et-mig-$BUILD_ID
+      - --region
+      - asia-east1
+      - --wait
+      - --quiet
+
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    id: deploy
     entrypoint: gcloud
     args:
       - run
@@ -32,6 +78,10 @@ steps:
       - gen2
       - --add-cloudsql-instances
       - echotrail-dev-508500-k6:asia-east1:echotrail-postgres
+      - --update-env-vars
+      - PGHOST=/cloudsql/echotrail-dev-508500-k6:asia-east1:echotrail-postgres,PGPORT=5432,PGDATABASE=echotrail,PGUSER=echotrail_app
+      - --update-secrets
+      - PGPASSWORD=echotrail-db-password:latest
       - --allow-unauthenticated
       - --quiet
 images:
