@@ -1,4 +1,5 @@
 import { resolveGeminiConfig, type GeminiConfig } from './config.js';
+import type { DashboardEvidence } from './persistence/types.js';
 
 export type ChatMessage = {
   role: 'user' | 'model';
@@ -52,9 +53,10 @@ export class LlmError extends Error {
 export interface LlmClient {
   chat(messages: ChatMessage[]): Promise<{ text: string }>;
   insight(messages: ChatMessage[]): Promise<InsightResult>;
+  synthesizeDashboard(evidence: DashboardEvidence[]): Promise<InsightResult['dashboard']>;
 }
 
-const dimensions: Record<Framework, readonly string[]> = {
+export const dimensions: Record<Framework, readonly string[]> = {
   riasec: ['R', 'I', 'A', 'S', 'E', 'C'],
   disc: ['D', 'I', 'S', 'C'],
   schein: [
@@ -105,6 +107,8 @@ dashboard 規則：
 - northStar：primaryAnchor、簡短 tagline、1 到 3 個 desires、一句 bottomLine、1 到 3 個 nextSteps。nextSteps 只能是從對話合理推得的發展方向，不可捏造經歷。
 
 輸出格式：{"card":{"title":"","happen":[""],"emotion":"","like":"","dislike":"","value":"","quote":""},"signals":[{"framework":"riasec","dimension":"I","strength":8,"evidenceQuote":""}],"dashboard":{"persona":{"headline":"","summaries":[""],"quote":""},"anchor":{"primary":"","ability":[""],"motivation":[""],"values":[""]},"keywords":[{"text":"","weight":3}],"patterns":[{"title":"","evidenceQuote":""}],"northStar":{"primaryAnchor":"","tagline":"","desires":[""],"bottomLine":"","nextSteps":[""]}}}`;
+
+const dashboardPrompt = `你是 EchoTrail 的整體職涯洞察引擎。輸入是使用者全部已確認事件、卡片、逐字訊息及訊號。只以這些資料綜合整體歷史，不捏造經歷。輸出單一 JSON 物件，包含 persona、anchor、keywords、patterns、northStar，結構與單張事件 dashboard 相同。persona.quote 與每個 patterns.evidenceQuote 必須逐字來自 user 訊息，或使用者明確編輯過的卡片 quote。不得使用 model 訊息作為引文。`;
 
 type GeminiResponse = {
   candidates?: Array<{
@@ -202,6 +206,29 @@ const isTextArray = (value: unknown, minimum = 1, maximum = 3): value is string[
   value.length >= minimum &&
   value.length <= maximum &&
   value.every((item) => typeof item === 'string' && item.trim());
+
+export function parseDashboardProfile(raw: string, evidence: DashboardEvidence[]): InsightResult['dashboard'] {
+  let value: unknown;
+  try { value = JSON.parse(raw.replace(/^```json\s*|\s*```$/g, '')); }
+  catch { throw new LlmError(502, 'Dashboard 模型產出不是有效 JSON。'); }
+  if (!isRecord(value) || !isRecord(value.persona) || !isRecord(value.anchor) || !isRecord(value.northStar) ||
+    !Array.isArray(value.keywords) || !Array.isArray(value.patterns)) throw new LlmError(502, 'Dashboard 模型產出缺少欄位。');
+  const quoted = (quote: unknown): boolean => typeof quote === 'string' && !!quote && evidence.some((event) =>
+    event.messages.some((message) => message.role === 'user' && message.text.includes(quote)) ||
+    (event.quoteSource === 'user_edit' && event.card.quote.includes(quote)));
+  const persona = value.persona;
+  const anchor = value.anchor;
+  const northStar = value.northStar;
+  if (typeof persona.headline !== 'string' || !persona.headline.trim() || !isTextArray(persona.summaries) || !quoted(persona.quote) ||
+    typeof anchor.primary !== 'string' || !anchor.primary.trim() || !isTextArray(anchor.ability) || !isTextArray(anchor.motivation) || !isTextArray(anchor.values) ||
+    value.keywords.length < 1 || value.keywords.length > 12 || !value.keywords.every((item) => isRecord(item) && typeof item.text === 'string' && !!item.text.trim() && Number.isInteger(item.weight) && (item.weight as number) >= 1 && (item.weight as number) <= 5) ||
+    value.patterns.length < 1 || value.patterns.length > 5 || !value.patterns.every((item) => isRecord(item) && typeof item.title === 'string' && !!item.title.trim() && quoted(item.evidenceQuote)) ||
+    typeof northStar.primaryAnchor !== 'string' || !northStar.primaryAnchor.trim() || typeof northStar.tagline !== 'string' || !northStar.tagline.trim() ||
+    !isTextArray(northStar.desires) || typeof northStar.bottomLine !== 'string' || !northStar.bottomLine.trim() || !isTextArray(northStar.nextSteps)) {
+    throw new LlmError(502, 'Dashboard 模型產出未通過格式或原文驗證。');
+  }
+  return value as InsightResult['dashboard'];
+}
 
 export const parseInsight = (raw: string, messages: ChatMessage[]): InsightResult => {
   let value: unknown;
@@ -377,5 +404,10 @@ export class GeminiClient implements LlmClient {
       }
     }
     throw new LlmError(502, '模型產出未通過 grounding 驗證。');
+  }
+
+  async synthesizeDashboard(evidence: DashboardEvidence[]): Promise<InsightResult['dashboard']> {
+    const raw = await requestGemini(this.config, dashboardPrompt, [{ role: 'user', text: JSON.stringify(evidence) }], true);
+    return parseDashboardProfile(raw, evidence);
   }
 }

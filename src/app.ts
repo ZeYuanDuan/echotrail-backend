@@ -1,12 +1,15 @@
 import Fastify, { type FastifyInstance } from 'fastify';
 import { GeminiClient, LlmError, parseMessages, type LlmClient } from './llm.js';
+import type { Pool } from 'pg';
+import { registerPersistenceRoutes } from './persistence/routes.js';
 
 type BuildAppOptions = {
   logger?: boolean;
   llm?: LlmClient;
+  pool?: Pool;
 };
 
-export const buildApp = ({ logger = true, llm }: BuildAppOptions = {}): FastifyInstance => {
+export const buildApp = ({ logger = true, llm, pool }: BuildAppOptions = {}): FastifyInstance => {
   const app = Fastify({ logger });
   let client = llm;
   const getClient = () => (client ??= new GeminiClient());
@@ -34,6 +37,8 @@ export const buildApp = ({ logger = true, llm }: BuildAppOptions = {}): FastifyI
       });
     }
   });
+
+  if (pool) registerPersistenceRoutes(app, { pool, llm: getClient() });
 
   return app;
 };

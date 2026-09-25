@@ -6,6 +6,7 @@ import type { LlmClient } from '../src/llm.js';
 describe('LLM routes', () => {
   let app: FastifyInstance;
   const llm: LlmClient = {
+    synthesizeDashboard: vi.fn(),
     chat: vi.fn().mockResolvedValue({ text: '你提到「有成就感」，哪個判斷最關鍵？' }),
     insight: vi.fn().mockResolvedValue({
       card: {

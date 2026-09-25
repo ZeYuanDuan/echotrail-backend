@@ -1,58 +1,60 @@
-# Cloud Run Health Service Implementation Plan
+# Cloud Run 健康檢查服務實作計畫
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **歷史里程碑：** 本計畫記錄 2026-09-13 建立後端基礎服務時的限制與步驟；核取方塊未同步標示現況。現在的持久化與 Cloud Build migration 工作請依 2026-09-25 的計畫及目前程式碼執行，不要把本文件的「無資料庫／無 LLM／無 trigger」限制套用到新工作。
 
-**Goal:** Build a Dockerized TypeScript/Fastify service with a public `GET /health` endpoint that can be manually built by Cloud Build and deployed to Cloud Run.
+> **供實作代理參考：** 必須使用 superpowers:subagent-driven-development（建議）或 superpowers:executing-plans，依序完成本計畫各任務。步驟以核取方塊（`- [ ]`）追蹤。
 
-**Architecture:** `src/app.ts` owns Fastify route registration and can be tested through Fastify injection without opening a TCP listener. `src/config.ts` validates the Cloud Run port contract; `src/server.ts` is the thin process entrypoint which binds the app to `0.0.0.0`. Docker builds TypeScript once, and the runtime image contains only compiled application files plus production dependencies.
+**目標：** 建立可用 Cloud Build 手動建置並部署到 Cloud Run 的 Docker 化 TypeScript／Fastify 服務，提供公開的 `GET /health` 端點。
 
-**Tech Stack:** Node.js 22 LTS, npm, TypeScript strict mode, Fastify 5, Vitest, Docker, Cloud Build, Artifact Registry, Cloud Run.
+**架構：** `src/app.ts` 建立 Fastify 路由，不開啟 TCP 監聽也能用 Fastify injection 測試。`src/config.ts` 驗證 Cloud Run 連接埠；`src/server.ts` 是精簡的程序入口，將應用程式綁定到 `0.0.0.0`。Docker 建置一次 TypeScript，執行階段映像只包含編譯後檔案及正式環境依賴套件。
 
-**Spec:** `docs/adr/0001-initial-backend-foundation.md`
+**技術：** Node.js 22 LTS、npm、TypeScript strict 模式、Fastify 5、Vitest、Docker、Cloud Build、Artifact Registry、Cloud Run。
 
-## Global Constraints
+**規格：** `docs/adr/0001-initial-backend-foundation.md`
 
-- Use the company GCP project `echotrail-dev-508500-k6` only through Google Cloud Console; do not invoke `gcloud` CLI.
-- Use `asia-east1` for Artifact Registry and Cloud Run.
-- Use the Docker Artifact Registry repository `echotrail` and image name `echotrail-backend`.
-- Do not create a GitHub branch-triggered build or any CI/CD automation.
-- Use Node.js 22 LTS, npm lockfile, TypeScript `strict`, and Fastify.
-- The only application endpoint in this milestone is unauthenticated `GET /health`, returning HTTP 200 with exactly `{ "status": "ok" }`.
-- Do not add authentication, databases, LLM clients, environment-secret handling, or business routes.
+## 全域限制
+
+- 此階段僅透過 Google Cloud Console 操作公司 GCP 專案 `echotrail-dev-508500-k6`，不呼叫 `gcloud` CLI。
+- Artifact Registry 與 Cloud Run 使用 `asia-east1`。
+- Docker Artifact Registry repository 名稱為 `echotrail`，映像名稱為 `echotrail-backend`。
+- 不建立由 GitHub 分支觸發的建置或其他 CI/CD 自動化。
+- 使用 Node.js 22 LTS、npm lockfile、TypeScript `strict` 及 Fastify。
+- 此里程碑唯一的應用程式端點是無須驗證的 `GET /health`，須回傳 HTTP 200 且內容恰為 `{ "status": "ok" }`。
+- 此階段不加入身分驗證、資料庫、LLM client、環境 Secret 處理或業務路由。
 
 ---
 
-## Planned file structure
+## 預計檔案結構
 
-| File | Responsibility |
+| 檔案 | 職責 |
 | --- | --- |
-| `package.json` | Node engine, scripts, production and development dependencies. |
-| `package-lock.json` | Reproducible npm dependency graph. |
-| `tsconfig.json` | Strict TypeScript compilation from `src/` to `dist/`. |
-| `src/app.ts` | Construct the Fastify app and register the health route. |
-| `src/config.ts` | Convert the optional `PORT` environment value into a valid TCP port. |
-| `src/server.ts` | Start the app on Cloud Run's port and `0.0.0.0`. |
-| `test/health.test.ts` | HTTP-level health contract test using Fastify injection. |
-| `test/config.test.ts` | Port-resolution behavior tests. |
-| `Dockerfile` | Multi-stage Node 22 build and production runtime image. |
-| `.dockerignore` | Exclude local artifacts from Docker build context. |
-| `cloudbuild.yaml` | Build and publish the image to the approved Artifact Registry path. |
-| `README.md` | Local commands and the Console-only deployment runbook. |
+| `package.json` | Node 版本限制、腳本、正式與開發依賴。 |
+| `package-lock.json` | 可重現的 npm 依賴關係。 |
+| `tsconfig.json` | 將 `src/` 以 TypeScript strict 模式編譯到 `dist/`。 |
+| `src/app.ts` | 建立 Fastify 應用程式並註冊健康檢查路由。 |
+| `src/config.ts` | 將選填的 `PORT` 環境變數轉成有效 TCP 連接埠。 |
+| `src/server.ts` | 在 Cloud Run 指定連接埠及 `0.0.0.0` 啟動應用程式。 |
+| `test/health.test.ts` | 使用 Fastify injection 測試 HTTP 健康檢查契約。 |
+| `test/config.test.ts` | 測試連接埠解析行為。 |
+| `Dockerfile` | 多階段 Node 22 建置與正式環境映像。 |
+| `.dockerignore` | 排除 Docker 建置目錄中的本機產物。 |
+| `cloudbuild.yaml` | 建置映像並推送到核准的 Artifact Registry 路徑。 |
+| `README.md` | 本機指令與只使用 Console 的部署操作說明。 |
 
-### Task 1: Establish the testable TypeScript project
+### 任務 1：建立可測試的 TypeScript 專案
 
-**Files:**
-- Create: `package.json`
-- Create: `tsconfig.json`
-- Create: `test/health.test.ts`
-- Create: `src/app.ts`
-- Create: `package-lock.json`
+**檔案：**
+- 新增：`package.json`
+- 新增：`tsconfig.json`
+- 新增：`test/health.test.ts`
+- 新增：`src/app.ts`
+- 新增：`package-lock.json`
 
-**Interfaces:**
-- Produces: `buildApp(): FastifyInstance` from `src/app.ts`.
-- Produces: `npm run build`, `npm start`, and `npm test` scripts.
+**介面：**
+- 提供：`src/app.ts` 的 `buildApp(): FastifyInstance`。
+- 提供：`npm run build`、`npm start` 與 `npm test` 腳本。
 
-- [ ] **Step 1: Create the npm manifest and TypeScript compiler configuration**
+- [ ] **步驟 1：建立 npm manifest 與 TypeScript 編譯器設定**
 
 ```json
 {
@@ -93,13 +95,13 @@
 }
 ```
 
-- [ ] **Step 2: Install the manifest dependencies and create the lockfile**
+- [ ] **步驟 2：安裝 manifest 所列依賴並建立 lockfile**
 
-Run: `npm install`
+執行：`npm install`
 
-Expected: `package-lock.json` is created and `npm` exits 0 under Node.js 22.
+預期：建立 `package-lock.json`，且 Node.js 22 下的 `npm` 以狀態碼 0 結束。
 
-- [ ] **Step 3: Write the failing HTTP contract test**
+- [ ] **步驟 3：先寫會失敗的 HTTP 契約測試**
 
 ```ts
 import { afterEach, describe, expect, it } from 'vitest';
@@ -124,13 +126,13 @@ describe('GET /health', () => {
 });
 ```
 
-- [ ] **Step 4: Run the test to verify it fails before implementation**
+- [ ] **步驟 4：執行測試，確認實作前會失敗**
 
-Run: `npm test -- test/health.test.ts`
+執行：`npm test -- test/health.test.ts`
 
-Expected: FAIL because `src/app.ts` does not exist.
+預期：`src/app.ts` 尚不存在，因此測試失敗。
 
-- [ ] **Step 5: Implement the minimal Fastify app**
+- [ ] **步驟 5：實作最小的 Fastify 應用程式**
 
 ```ts
 import Fastify, { type FastifyInstance } from 'fastify';
@@ -144,32 +146,32 @@ export const buildApp = (): FastifyInstance => {
 };
 ```
 
-- [ ] **Step 6: Run the health test and TypeScript compiler**
+- [ ] **步驟 6：執行健康檢查測試與 TypeScript 編譯器**
 
-Run: `npm test -- test/health.test.ts && npm run build`
+執行：`npm test -- test/health.test.ts && npm run build`
 
-Expected: PASS; compilation creates `dist/app.js` with no TypeScript errors.
+預期：測試通過；編譯建立 `dist/app.js`，沒有 TypeScript 錯誤。
 
-- [ ] **Step 7: Commit the testable health application**
+- [ ] **步驟 7：提交可測試的健康檢查應用程式**
 
 ```bash
 git add package.json package-lock.json tsconfig.json src/app.ts test/health.test.ts
 git commit -m "feat: add Fastify health endpoint"
 ```
 
-### Task 2: Add the Cloud Run server entrypoint
+### 任務 2：加入 Cloud Run 伺服器入口
 
-**Files:**
-- Create: `src/config.ts`
-- Create: `src/server.ts`
-- Create: `test/config.test.ts`
+**檔案：**
+- 新增：`src/config.ts`
+- 新增：`src/server.ts`
+- 新增：`test/config.test.ts`
 
-**Interfaces:**
-- Consumes: `buildApp(): FastifyInstance` from `src/app.ts`.
-- Produces: `resolvePort(value?: string): number` from `src/config.ts`.
-- Produces: executable `dist/server.js` for `npm start` and Docker `CMD`.
+**介面：**
+- 使用：`src/app.ts` 的 `buildApp(): FastifyInstance`。
+- 提供：`src/config.ts` 的 `resolvePort(value?: string): number`。
+- 提供：可由 `npm start` 與 Docker `CMD` 執行的 `dist/server.js`。
 
-- [ ] **Step 1: Write failing port-resolution tests**
+- [ ] **步驟 1：先寫會失敗的連接埠解析測試**
 
 ```ts
 import { describe, expect, it } from 'vitest';
@@ -190,13 +192,13 @@ describe('resolvePort', () => {
 });
 ```
 
-- [ ] **Step 2: Run the config test to verify it fails**
+- [ ] **步驟 2：執行設定測試，確認會失敗**
 
-Run: `npm test -- test/config.test.ts`
+執行：`npm test -- test/config.test.ts`
 
-Expected: FAIL because `src/config.ts` does not exist.
+預期：`src/config.ts` 尚不存在，因此測試失敗。
 
-- [ ] **Step 3: Implement port resolution and the server entrypoint**
+- [ ] **步驟 3：實作連接埠解析與伺服器入口**
 
 ```ts
 // src/config.ts
@@ -227,37 +229,37 @@ try {
 }
 ```
 
-- [ ] **Step 4: Run all unit tests and compile**
+- [ ] **步驟 4：執行全部單元測試與編譯**
 
-Run: `npm test && npm run build`
+執行：`npm test && npm run build`
 
-Expected: PASS; `dist/server.js` imports `dist/app.js` and `dist/config.js` using `.js` module specifiers.
+預期：測試通過；`dist/server.js` 以 `.js` 模組路徑匯入 `dist/app.js` 與 `dist/config.js`。
 
-- [ ] **Step 5: Perform a local HTTP smoke test**
+- [ ] **步驟 5：執行本機 HTTP 冒煙測試**
 
-Run: `npm start`
+執行：`npm start`
 
-Expected: Fastify reports that it is listening on `http://0.0.0.0:8080`; in a second terminal run `curl --fail http://127.0.0.1:8080/health`, which prints `{"status":"ok"}`. Stop the server after the request.
+預期：Fastify 回報正在 `http://0.0.0.0:8080` 監聽；在另一個終端執行 `curl --fail http://127.0.0.1:8080/health`，應輸出 `{"status":"ok"}`。請求完成後停止伺服器。
 
-- [ ] **Step 6: Commit the Cloud Run process entrypoint**
+- [ ] **步驟 6：提交 Cloud Run 程序入口**
 
 ```bash
 git add src/config.ts src/server.ts test/config.test.ts
 git commit -m "feat: listen on Cloud Run port"
 ```
 
-### Task 3: Containerize and publish the service configuration
+### 任務 3：容器化並發布服務設定
 
-**Files:**
-- Create: `Dockerfile`
-- Create: `.dockerignore`
-- Create: `cloudbuild.yaml`
+**檔案：**
+- 新增：`Dockerfile`
+- 新增：`.dockerignore`
+- 新增：`cloudbuild.yaml`
 
-**Interfaces:**
-- Consumes: `package-lock.json`, `tsconfig.json`, `src/`, and `npm run build`.
-- Produces: OCI image `asia-east1-docker.pkg.dev/echotrail-dev-508500-k6/echotrail/echotrail-backend:$BUILD_ID`.
+**介面：**
+- 使用：`package-lock.json`、`tsconfig.json`、`src/` 與 `npm run build`。
+- 提供：OCI 映像 `asia-east1-docker.pkg.dev/echotrail-dev-508500-k6/echotrail/echotrail-backend:$BUILD_ID`。
 
-- [ ] **Step 1: Create Docker build exclusions**
+- [ ] **步驟 1：建立 Docker 建置排除清單**
 
 ```gitignore
 node_modules
@@ -268,7 +270,7 @@ coverage
 docs
 ```
 
-- [ ] **Step 2: Create the multi-stage Node 22 Dockerfile**
+- [ ] **步驟 2：建立多階段 Node 22 Dockerfile**
 
 ```dockerfile
 FROM node:22-bookworm-slim AS build
@@ -290,7 +292,7 @@ EXPOSE 8080
 CMD ["node", "dist/server.js"]
 ```
 
-- [ ] **Step 3: Create the Cloud Build configuration**
+- [ ] **步驟 3：建立 Cloud Build 設定**
 
 ```yaml
 steps:
@@ -304,37 +306,37 @@ images:
   - asia-east1-docker.pkg.dev/echotrail-dev-508500-k6/echotrail/echotrail-backend:$BUILD_ID
 ```
 
-- [ ] **Step 4: Build the image locally and check its public contract**
+- [ ] **步驟 4：在本機建置映像並驗證公開端點**
 
-Run: `docker build --tag echotrail-backend:local .`
+執行：`docker build --tag echotrail-backend:local .`
 
-Expected: Docker finishes with exit code 0. Then run `docker run --rm --publish 8080:8080 echotrail-backend:local`; in a second terminal run `curl --fail http://127.0.0.1:8080/health`, which prints `{"status":"ok"}`. Stop the container after the request.
+預期：Docker 以狀態碼 0 結束。接著執行 `docker run --rm --publish 8080:8080 echotrail-backend:local`，在另一個終端執行 `curl --fail http://127.0.0.1:8080/health`，應輸出 `{"status":"ok"}`。請求完成後停止容器。
 
-- [ ] **Step 5: Verify no private data is embedded in the image configuration**
+- [ ] **步驟 5：確認映像設定未嵌入私人資料**
 
-Run: `docker image inspect echotrail-backend:local --format '{{json .Config.Env}}'`
+執行：`docker image inspect echotrail-backend:local --format '{{json .Config.Env}}'`
 
-Expected: output includes `NODE_ENV=production` and contains no credentials, token, database URL, or GCP service-account key.
+預期：輸出包含 `NODE_ENV=production`，不含憑證、token、資料庫 URL 或 GCP 服務帳號金鑰。
 
-- [ ] **Step 6: Commit container and Cloud Build configuration**
+- [ ] **步驟 6：提交容器與 Cloud Build 設定**
 
 ```bash
 git add Dockerfile .dockerignore cloudbuild.yaml
 git commit -m "build: add Cloud Run container configuration"
 ```
 
-### Task 4: Document local validation and Console-only deployment
+### 任務 4：記錄本機驗證與 Console 部署流程
 
-**Files:**
-- Modify: `README.md`
+**檔案：**
+- 修改：`README.md`
 
-**Interfaces:**
-- Consumes: image name and project/region constants from `cloudbuild.yaml`.
-- Produces: an operator runbook with no `gcloud` commands and no GitHub branch-trigger setup.
+**介面：**
+- 使用：`cloudbuild.yaml` 中的映像名稱、專案與區域常數。
+- 提供：不含 `gcloud` 指令或 GitHub 分支 trigger 設定的操作指南。
 
-- [ ] **Step 1: Add local development and test commands**
+- [ ] **步驟 1：加入本機開發與測試指令**
 
-Add a `## Local development` section containing exactly these commands:
+新增 `## Local development` 區塊，內容須包含以下指令：
 
 ```bash
 npm ci
@@ -344,11 +346,11 @@ npm start
 curl --fail http://127.0.0.1:8080/health
 ```
 
-State that `PORT` overrides `8080`, and that the expected response body is `{"status":"ok"}`.
+說明 `PORT` 可覆寫 `8080`，預期回應內容為 `{"status":"ok"}`。
 
-- [ ] **Step 2: Add Docker validation commands**
+- [ ] **步驟 2：加入 Docker 驗證指令**
 
-Add a `## Docker validation` section containing:
+新增 `## Docker validation` 區塊，內容如下：
 
 ```bash
 docker build --tag echotrail-backend:local .
@@ -356,67 +358,67 @@ docker run --rm --publish 8080:8080 echotrail-backend:local
 curl --fail http://127.0.0.1:8080/health
 ```
 
-- [ ] **Step 3: Add the manual Google Cloud Console runbook**
+- [ ] **步驟 3：加入手動 Google Cloud Console 部署指南**
 
-Document these actions in order:
+依下列順序記錄操作：
 
-1. Sign in to Google Cloud Console with the company account and select project `echotrail-dev-508500-k6`.
-2. Enable Cloud Build, Artifact Registry, and Cloud Run if Console prompts for them.
-3. In Artifact Registry, create `echotrail` only if absent: format **Docker**, mode **Standard**, location type **Region**, region **asia-east1**.
-4. In Cloud Build, configure a **manual** build from the chosen source revision using repository-root `cloudbuild.yaml`; do not configure a push, pull-request, or tag event. Wait for the build to show `SUCCESS`, then copy the emitted Artifact Registry image URI.
-5. In Cloud Run, select **Deploy one revision from an existing container image**, choose that URI, name the service `echotrail-backend`, select **asia-east1**, and choose **Allow public access**.
-6. After the service is ready, open `<Cloud Run service URL>/health` and verify HTTP 200 with `{"status":"ok"}`.
+1. 使用公司帳號登入 Google Cloud Console，選擇 `echotrail-dev-508500-k6` 專案。
+2. 如果 Console 提示，啟用 Cloud Build、Artifact Registry 與 Cloud Run。
+3. 在 Artifact Registry 中，僅於 `echotrail` 不存在時建立：格式選 **Docker**、模式選 **Standard**、位置類型選 **Region**、區域選 **asia-east1**。
+4. 在 Cloud Build，使用所選來源版本與 repository 根目錄的 `cloudbuild.yaml` 設定**手動**建置；不設定 push、pull request 或 tag 事件。等待建置顯示 `SUCCESS`，再複製產生的 Artifact Registry 映像 URI。
+5. 在 Cloud Run 選擇 **Deploy one revision from an existing container image**，指定該 URI，服務名稱設為 `echotrail-backend`、區域設為 **asia-east1**，並選擇 **Allow public access**。
+6. 服務就緒後，開啟 `<Cloud Run service URL>/health`，確認 HTTP 200 與 `{"status":"ok"}`。
 
-- [ ] **Step 4: State the required permission escalation path**
+- [ ] **步驟 4：說明必要的權限申請路徑**
 
-Add that missing Console permissions must be requested from the company project administrator; do not attempt to bypass them with a personal account, service-account key, Cloud Shell, or local `gcloud` CLI.
+若缺少 Console 權限，須向公司專案管理員申請；不得以個人帳號、服務帳號金鑰、Cloud Shell 或本機 `gcloud` CLI 繞過。
 
-- [ ] **Step 5: Review the README commands against repository scripts and image path**
+- [ ] **步驟 5：對照 repository 腳本與映像路徑檢查 README 指令**
 
-Run: `rg -n 'npm ci|npm test|npm run build|npm start|asia-east1-docker.pkg.dev|gcloud|trigger' README.md package.json cloudbuild.yaml`
+執行：`rg -n 'npm ci|npm test|npm run build|npm start|asia-east1-docker.pkg.dev|gcloud|trigger' README.md package.json cloudbuild.yaml`
 
-Expected: local commands match `package.json`; the image path matches `cloudbuild.yaml`; README has no `gcloud` command and says no branch trigger is configured.
+預期：本機指令與 `package.json` 一致；映像路徑與 `cloudbuild.yaml` 一致；README 不含 `gcloud` 指令，並說明未設定分支 trigger。
 
-- [ ] **Step 6: Commit the operator documentation**
+- [ ] **步驟 6：提交操作文件**
 
 ```bash
 git add README.md
 git commit -m "docs: add Cloud Run deployment runbook"
 ```
 
-### Task 5: Final verification and delivery
+### 任務 5：最後驗證與交付
 
-**Files:**
-- Verify: all files listed in the planned file structure.
+**檔案：**
+- 驗證：預計檔案結構中列出的所有檔案。
 
-**Interfaces:**
-- Consumes: completed Tasks 1–4.
-- Produces: a verified local and containerized service ready for the user's Console deployment.
+**介面：**
+- 使用：已完成的任務 1–4。
+- 提供：經過本機及容器驗證、可供使用者透過 Console 部署的服務。
 
-- [ ] **Step 1: Verify the clean TypeScript and test checks**
+- [ ] **步驟 1：確認 TypeScript 與測試檢查結果**
 
-Run: `npm ci && npm test && npm run build`
+執行：`npm ci && npm test && npm run build`
 
-Expected: all commands exit 0.
+預期：全部指令以狀態碼 0 結束。
 
-- [ ] **Step 2: Verify the Docker image and endpoint one final time**
+- [ ] **步驟 2：最後一次驗證 Docker 映像與端點**
 
-Run: `docker build --tag echotrail-backend:verify .`
+執行：`docker build --tag echotrail-backend:verify .`
 
-Expected: exit 0. Run the image, call `curl --fail http://127.0.0.1:8080/health`, confirm HTTP 200 and `{"status":"ok"}`, then stop the container.
+預期：建置以狀態碼 0 結束。啟動映像、呼叫 `curl --fail http://127.0.0.1:8080/health`、確認 HTTP 200 與 `{"status":"ok"}`，最後停止容器。
 
-- [ ] **Step 3: Review the final Git state**
+- [ ] **步驟 3：檢查最後的 Git 狀態**
 
-Run: `git status --short && git log --oneline -5`
+執行：`git status --short && git log --oneline -5`
 
-Expected: only intentional changes are present; each implementation task has its focused commit.
+預期：僅有預定變更；每個實作任務都有獨立的提交。
 
-- [ ] **Step 4: Hand off the Console deployment checklist**
+- [ ] **步驟 4：交付 Console 部署檢查清單**
 
-Report the exact Artifact Registry image URI format, the Cloud Run service name, the target region, the `/health` URL suffix, and any Console permission error verbatim. Do not perform Cloud Console operations or use `gcloud` CLI.
+回報確切的 Artifact Registry 映像 URI 格式、Cloud Run 服務名稱、目標區域、`/health` URL 後綴，以及任何 Console 權限錯誤的原文。不得執行 Cloud Console 操作或使用 `gcloud` CLI。
 
-## Plan self-review
+## 計畫自我檢查
 
-- **Spec coverage:** Task 1 delivers Fastify and public `/health`; Task 2 implements the `PORT` and `0.0.0.0` Cloud Run process contract; Task 3 delivers Node 22 Docker and Cloud Build publishing; Task 4 documents the manual Console-only workflow and no-trigger constraint; Task 5 verifies the requested outcomes.
-- **Placeholder scan:** No incomplete marker, deferred implementation instruction, or unspecified interface remains.
-- **Type consistency:** `buildApp()` is produced by Task 1 and consumed by Task 2; `resolvePort()` is produced by Task 2 and used only by `src/server.ts`; Docker executes the `dist/server.js` produced by TypeScript compilation.
+- **規格涵蓋：** 任務 1 提供 Fastify 與公開 `/health`；任務 2 實作 `PORT` 與 `0.0.0.0` 的 Cloud Run 程序契約；任務 3 提供 Node 22 Docker 與 Cloud Build 映像發布；任務 4 記錄僅使用 Console 的手動流程及不建立 trigger 的限制；任務 5 驗證要求的結果。
+- **佔位內容檢查：** 沒有未完成標記、延期實作指示或未指明的介面。
+- **型別一致性：** 任務 1 提供 `buildApp()`，任務 2 使用它；任務 2 提供 `resolvePort()`，只有 `src/server.ts` 使用；Docker 執行 TypeScript 編譯產生的 `dist/server.js`。
