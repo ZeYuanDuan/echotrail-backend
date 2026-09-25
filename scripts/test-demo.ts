@@ -10,12 +10,12 @@ const script = [
 type Message = { role: 'user' | 'model'; text: string };
 const wait = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
-const post = async (path: string, messages: Message[]) => {
+const post = async (path: string, payload: unknown) => {
   const startedAt = performance.now();
   const response = await fetch(`${baseUrl}${path}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ messages }),
+    body: JSON.stringify(payload),
   });
   const body = (await response.json()) as Record<string, unknown>;
   if (!response.ok) throw new Error(`${path} ${response.status}: ${String(body.error)}`);
@@ -29,15 +29,33 @@ for (let iteration = 1; iteration <= iterations; iteration += 1) {
   for (const text of script) {
     if (messages.length) await wait(requestInterval);
     messages.push({ role: 'user', text });
-    const chat = await post('/api/llm/chat', messages);
+    const chat = await post('/api/llm/chat', { messages });
     duration += chat.duration;
     if (typeof chat.body.text !== 'string') throw new Error('Chat response is missing text');
     messages.push({ role: 'model', text: chat.body.text });
   }
   await wait(requestInterval);
-  const insight = await post('/api/llm/insight', messages);
+  const insight = await post('/api/llm/insight', { messages });
   duration += insight.duration;
-  const signals = Array.isArray(insight.body.signals) ? insight.body.signals.length : 0;
+  if (
+    !insight.body.card ||
+    typeof insight.body.card !== 'object' ||
+    typeof insight.body.careerAnchorType !== 'string'
+  ) {
+    throw new Error('Insight response is missing card or careerAnchorType');
+  }
+  await wait(requestInterval);
+  const dashboard = await post('/api/llm/dashboard', {
+    events: [
+      {
+        eventId: 1,
+        ...insight.body.card,
+        careerAnchorType: insight.body.careerAnchorType,
+      },
+    ],
+  });
+  duration += dashboard.duration;
+  const signals = Array.isArray(dashboard.body.signals) ? dashboard.body.signals.length : 0;
   results.push({ iteration, duration, signals });
   console.log(`run ${iteration}/${iterations}: ok, ${duration}ms, ${signals} grounded signals`);
   if (iteration < iterations) await wait(requestInterval);

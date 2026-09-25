@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { GeminiClient, LlmError, parseInsight, parseMessages } from '../src/llm.js';
+import {
+  GeminiClient,
+  LlmError,
+  parseDashboard,
+  parseInsight,
+  parseMessages,
+} from '../src/llm.js';
 
 const messages = [
   { role: 'user' as const, text: '我很有成就感，也重視先理解真正的問題。' },
@@ -21,7 +27,7 @@ const dashboard = {
     { text: '問題', weight: 4 },
     { text: '行動', weight: 3 },
   ],
-  patterns: [{ title: '先釐清再行動', evidenceQuote: '理解真正的問題' }],
+  patterns: [{ title: '先釐清再行動', evidenceQuote: '我很有成就感' }],
   northStar: {
     primaryAnchor: '專家達人',
     tagline: '用理解創造價值',
@@ -56,15 +62,13 @@ describe('LLM input and grounded output', () => {
         value: '先理解問題再行動',
         quote: '我很有成就感',
       },
-      signals: [
-        { framework: 'riasec', dimension: 'I', strength: 8, evidenceQuote: '不存在的原話' },
-      ],
-      dashboard,
+      careerAnchorType: '專家達人',
     });
-    expect(() => parseInsight(raw, messages)).toThrow(LlmError);
+    const inventedQuote = raw.replace('我很有成就感', '不存在的原話');
+    expect(() => parseInsight(inventedQuote, messages)).toThrow(LlmError);
   });
 
-  it('accepts a grounded card and chart signal', () => {
+  it('accepts a grounded Echo Card and career anchor', () => {
     const raw = JSON.stringify({
       card: {
         title: '理解問題',
@@ -75,18 +79,12 @@ describe('LLM input and grounded output', () => {
         value: '先理解問題再行動',
         quote: '我很有成就感',
       },
-      signals: [
-        { framework: 'riasec', dimension: 'I', strength: 8, evidenceQuote: '理解真正的問題' },
-      ],
-      dashboard,
+      careerAnchorType: '專家達人',
     });
-    expect(parseInsight(raw, messages).signals[0]?.strength).toBe(8);
+    expect(parseInsight(raw, messages).careerAnchorType).toBe('專家達人');
   });
 
-  it('does not count whitespace or symbols toward the minimum card quote length', () => {
-    const symbolMessages = [
-      { role: 'user' as const, text: '我 ！。也重視先理解真正的問題。' },
-    ];
+  it('does not count whitespace or symbols toward the minimum Echo Card quote length', () => {
     const raw = JSON.stringify({
       card: {
         title: '理解問題',
@@ -97,38 +95,176 @@ describe('LLM input and grounded output', () => {
         value: '先理解問題再行動',
         quote: '我 ！。',
       },
-      signals: [
-        { framework: 'riasec', dimension: 'I', strength: 8, evidenceQuote: '理解真正的問題' },
-      ],
-      dashboard: {
-        ...dashboard,
-        persona: { ...dashboard.persona, quote: '理解真正的問題' },
-      },
+      careerAnchorType: '專家達人',
     });
-    expect(() => parseInsight(raw, symbolMessages)).toThrow(LlmError);
+    expect(() => parseInsight(raw, messages)).toThrow(LlmError);
   });
 
-  it('does not count whitespace or symbols toward the minimum evidence quote length', () => {
-    const symbolMessages = [
-      { role: 'user' as const, text: '我 ！。也重視先理解真正的問題。' },
-    ];
-    const raw = JSON.stringify({
-      card: {
+  it('validates Dashboard evidence against stored event quotes', () => {
+    const events = [
+      {
+        eventId: 1,
         title: '理解問題',
         happen: ['完成一次需求探索'],
         emotion: '有成就感',
         like: '我在意理解問題',
         dislike: '我不喜歡直接照單全收',
         value: '先理解問題再行動',
-        quote: '理解真正的問題',
+        quote: '我很有成就感',
+        careerAnchorType: '專家達人' as const,
       },
-      signals: [{ framework: 'riasec', dimension: 'I', strength: 8, evidenceQuote: '我 ！。' }],
-      dashboard: {
-        ...dashboard,
-        persona: { ...dashboard.persona, quote: '理解真正的問題' },
-      },
+    ];
+    const raw = JSON.stringify({
+      signals: [
+        { framework: 'riasec', dimension: 'I', strength: 8, evidenceQuote: '我很有成就感' },
+      ],
+      dashboard,
     });
-    expect(() => parseInsight(raw, symbolMessages)).toThrow(LlmError);
+    expect(parseDashboard(raw, events).signals[0]?.strength).toBe(8);
+  });
+
+  it('rejects a shortened Dashboard quote that is not in the evidence allowlist', () => {
+    const events = [
+      {
+        eventId: 1,
+        title: '理解問題',
+        happen: ['完成一次需求探索'],
+        emotion: '有成就感',
+        like: '我在意理解問題',
+        dislike: '我不喜歡直接照單全收',
+        value: '先理解問題再行動',
+        quote: '我很有成就感，也重視先理解真正的問題',
+        careerAnchorType: '專家達人' as const,
+      },
+    ];
+    const raw = JSON.stringify({
+      signals: [
+        { framework: 'riasec', dimension: 'I', strength: 8, evidenceQuote: '我很有成就感' },
+      ],
+      dashboard,
+    });
+
+    expect(() => parseDashboard(raw, events)).toThrow(
+      'signals[0].evidenceQuote 必須完整複製 allowedEvidenceQuotes',
+    );
+  });
+
+  it('does not count whitespace or symbols toward the minimum Dashboard quote length', () => {
+    const events = [
+      {
+        eventId: 1,
+        title: '理解問題',
+        happen: ['完成一次需求探索'],
+        emotion: '有成就感',
+        like: '我在意理解問題',
+        dislike: '我不喜歡直接照單全收',
+        value: '先理解問題再行動',
+        quote: '我 ！。我很有成就感',
+        careerAnchorType: '專家達人' as const,
+      },
+    ];
+    const raw = JSON.stringify({
+      signals: [{ framework: 'riasec', dimension: 'I', strength: 8, evidenceQuote: '我 ！。' }],
+      dashboard,
+    });
+    expect(() => parseDashboard(raw, events)).toThrow(LlmError);
+  });
+
+  it('reports the exact invalid Dashboard dimension', () => {
+    const events = [
+      {
+        eventId: 1,
+        title: '理解問題',
+        happen: ['完成一次需求探索'],
+        emotion: '有成就感',
+        like: '我在意理解問題',
+        dislike: '我不喜歡直接照單全收',
+        value: '先理解問題再行動',
+        quote: '我很有成就感',
+        careerAnchorType: '專家達人' as const,
+      },
+    ];
+    const raw = JSON.stringify({
+      signals: [
+        {
+          framework: 'schein',
+          dimension: '專家達人',
+          strength: 8,
+          evidenceQuote: '我很有成就感',
+        },
+      ],
+      dashboard,
+    });
+
+    expect(() => parseDashboard(raw, events)).toThrow(
+      'signals[0].dimension 必須是 schein 的允許代碼',
+    );
+  });
+
+  it('gives Gemini an explicit Dashboard evidence allowlist and targeted retry reason', async () => {
+    const events = [
+      {
+        eventId: 1,
+        title: '理解問題',
+        happen: ['完成一次需求探索'],
+        emotion: '有成就感',
+        like: '我在意理解問題',
+        dislike: '我不喜歡直接照單全收',
+        value: '先理解問題再行動',
+        quote: '我很有成就感',
+        careerAnchorType: '專家達人' as const,
+      },
+    ];
+    const invalidRaw = JSON.stringify({
+      signals: [
+        {
+          framework: 'riasec',
+          dimension: '研究型',
+          strength: 8,
+          evidenceQuote: '我很有成就感',
+        },
+      ],
+      dashboard,
+    });
+    const validRaw = JSON.stringify({
+      signals: [
+        { framework: 'riasec', dimension: 'I', strength: 8, evidenceQuote: '我很有成就感' },
+      ],
+      dashboard,
+    });
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ candidates: [{ content: { parts: [{ text: invalidRaw }] } }] }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ candidates: [{ content: { parts: [{ text: validRaw }] } }] }),
+      });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await new GeminiClient({ apiKey: 'test-key', model: 'test-model' }).dashboard(
+      events,
+    );
+
+    expect(result.signals[0]?.dimension).toBe('I');
+    const firstRequest = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as {
+      systemInstruction: { parts: Array<{ text: string }> };
+      contents: Array<{ parts: Array<{ text: string }> }>;
+    };
+    expect(firstRequest.systemInstruction.parts[0]?.text).toContain(
+      'riasec 使用 R、I、A、S、E、C',
+    );
+    expect(JSON.parse(firstRequest.contents[0]?.parts[0]?.text ?? '{}')).toMatchObject({
+      allowedEvidenceQuotes: [{ eventId: 1, quote: '我很有成就感' }],
+    });
+    const retryRequest = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body)) as {
+      contents: Array<{ parts: Array<{ text: string }> }>;
+    };
+    expect(retryRequest.contents.at(-1)?.parts[0]?.text).toContain(
+      'signals[0].dimension 必須是 riasec 的允許代碼：R、I、A、S、E、C',
+    );
   });
 
   it('gives the failed JSON and validation reason back to Gemini for a targeted retry', async () => {
@@ -142,8 +278,7 @@ describe('LLM input and grounded output', () => {
         value: '先理解問題再行動',
         quote: '我非常有成就感',
       },
-      signals: [],
-      dashboard,
+      careerAnchorType: '專家達人',
     });
     const validRaw = JSON.stringify({
       card: {
@@ -155,8 +290,7 @@ describe('LLM input and grounded output', () => {
         value: '先理解問題再行動',
         quote: '我很有成就感',
       },
-      signals: [],
-      dashboard,
+      careerAnchorType: '專家達人',
     });
     const fetchMock = vi
       .fn()
@@ -176,6 +310,26 @@ describe('LLM input and grounded output', () => {
     expect(retryRequest.contents.at(-1)?.parts[0]?.text).toContain(
       '模型產出的卡片未通過 grounding 驗證',
     );
+  });
+
+  it('switches to the more direct prompt after ten user turns', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ candidates: [{ content: { parts: [{ text: '回覆' }] } }] }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const client = new GeminiClient({ apiKey: 'test-key', model: 'test-model' });
+    const history = Array.from({ length: 21 }, (_, index) => ({
+      role: (index % 2 === 0 ? 'user' : 'model') as 'user' | 'model',
+      text: `第 ${index + 1} 則`,
+    }));
+
+    await client.chat(history);
+
+    const request = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as {
+      systemInstruction: { parts: Array<{ text: string }> };
+    };
+    expect(request.systemInstruction.parts[0]?.text).toContain('第 11～15 輪');
   });
 
   it('allows the introduction only in the first-turn prompt', async () => {

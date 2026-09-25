@@ -1,13 +1,8 @@
 import { resolveGeminiConfig, type GeminiConfig } from './config.js';
 
-export type ChatMessage = {
-  role: 'user' | 'model';
-  text: string;
-};
-
+export type ChatMessage = { role: 'user' | 'model'; text: string };
 export const maxMessageLength = 800;
 export type Framework = 'riasec' | 'disc' | 'schein';
-
 export type InsightSignal = {
   framework: Framework;
   dimension: string;
@@ -15,31 +10,49 @@ export type InsightSignal = {
   evidenceQuote: string;
 };
 
-export type InsightResult = {
-  card: {
-    title: string;
-    happen: string[];
-    emotion: string;
-    like: string;
-    dislike: string;
-    value: string;
-    quote: string;
-  };
-  signals: InsightSignal[];
-  dashboard: {
-    persona: { headline: string; summaries: string[]; quote: string };
-    anchor: { primary: string; ability: string[]; motivation: string[]; values: string[] };
-    keywords: Array<{ text: string; weight: number }>;
-    patterns: Array<{ title: string; evidenceQuote: string }>;
-    northStar: {
-      primaryAnchor: string;
-      tagline: string;
-      desires: string[];
-      bottomLine: string;
-      nextSteps: string[];
-    };
+export const careerAnchorTypes = [
+  '專家達人',
+  '專業經理人',
+  '自主工作者',
+  '安穩可靠者',
+  '創造者',
+  '俠客奉獻者',
+  '挑戰者',
+  '樂活族',
+  '無法明確歸類',
+] as const;
+export type CareerAnchorType = (typeof careerAnchorTypes)[number];
+
+export type EchoCard = {
+  title: string;
+  happen: string[];
+  emotion: string;
+  like: string;
+  dislike: string;
+  value: string;
+  quote: string;
+};
+
+export type DashboardProfile = {
+  persona: { headline: string; summaries: string[]; quote: string };
+  anchor: { primary: string; ability: string[]; motivation: string[]; values: string[] };
+  keywords: Array<{ text: string; weight: number }>;
+  patterns: Array<{ title: string; evidenceQuote: string }>;
+  northStar: {
+    primaryAnchor: string;
+    tagline: string;
+    desires: string[];
+    bottomLine: string;
+    nextSteps: string[];
   };
 };
+
+export type InsightResult = { card: EchoCard; careerAnchorType: CareerAnchorType };
+export type DashboardEvent = EchoCard & {
+  eventId: number;
+  careerAnchorType: CareerAnchorType;
+};
+export type DashboardResult = { signals: InsightSignal[]; dashboard: DashboardProfile };
 
 export class LlmError extends Error {
   constructor(
@@ -53,6 +66,7 @@ export class LlmError extends Error {
 export interface LlmClient {
   chat(messages: ChatMessage[]): Promise<{ text: string }>;
   insight(messages: ChatMessage[]): Promise<InsightResult>;
+  dashboard(events: DashboardEvent[]): Promise<DashboardResult>;
 }
 
 const dimensions: Record<Framework, readonly string[]> = {
@@ -72,26 +86,36 @@ const dimensions: Record<Framework, readonly string[]> = {
 
 const minimumQuoteLength = 4;
 
-const commonChatPrompt = `你是「艾可」，EchoTrail 產品裡的職涯自我覺察教練。請使用繁體中文與台灣用語。
+const commonChatPrompt = `你是「艾可」，EchoTrail 產品裡的職涯自我覺察教練。請使用繁體中文與台灣用語。你會讀到這次對話的完整逐字記錄。
 
-每次回覆都用自然語言完成三件事，不要使用條列：
+每輪先判斷情境：悲觀螺旋時先承接情緒並把事實與推論分開；快速正向包裝時溫和指出被跳過的張力；真心樂觀分享時指出使用者具體做對的事，並連結到累積的自我認識；無法判斷時採中性策略。
+
+一般回覆依序完成三件事：
 1. 根據使用者剛才提供的具體細節，替感受命名並指出來源。
 2. 只指出一個具體矛盾、外部訊號與內在判斷的落差、重複模式或洞見。
-3. 只問一個具體、可回答的問題，依序協助釐清事件、情緒、在意的點與不能接受的點。
+3. 只問一個具體、可回答的問題，協助釐清事件、情緒、在意／擅長、討厭／不適合與價值主張。
 
 不要用「聽到你說……」、「你提到……」或類似的固定句型複述使用者的話。優先直接回應其意思；只有在某個關鍵詞有助於精準觀察時，才可引用最短必要片段，不得重複整句或大段改寫。
 
-不得捏造使用者沒說過的話。真心樂觀分享時，萃取做對的判斷，不要硬找問題；悲觀螺旋時，把事實與推論分開；快速正向包裝時，溫和指出被略過的張力。不要聲稱已產生卡片或更新儀表板。若出現自傷或極端負面語句，中止一般分析，改為關懷並建議尋求在地緊急或專業協助。`;
+不得捏造使用者沒說過的內容。事件、情緒與引證原話必須來自 user 的實際文字；喜歡／在意／適合／擅長與討厭／不適合／不在意／不擅長可以根據事件與情緒合理推論。內容不足時寧可保守或留待追問。
+
+若事件、情緒、正向傾向、反向傾向、價值主張與可引用原話都已有足夠內容，在回覆最後自然邀請：「這幾層感受你想先整理起來看看嗎？如果差不多了，可以點下方的 Generate Insight。」未具備時不得主動提及產卡。
+
+若出現自傷、輕生意念或極端負面語句，立即中止一般分析與產卡邀請，先確認當下安全、鼓勵聯絡可信任的人與專業協助；在台灣可提供衛福部 1925 安心專線（24 小時）、生命線 1995、張老師 1980，若有立即危險則請撥 119／110 或前往最近急診。`;
 
 const firstChatPrompt = `${commonChatPrompt}
 
-目前是第 1 輪。只有這一輪可以使用「嗨，我是艾可。」，且最多一次。`;
+目前是第 1 輪。只有這一輪可以使用「嗨，我是艾可。」，且最多一次。回覆必須是自然語言，不得使用條列。保持陪伴感，不要像問卷。`;
 
-const followUpChatPrompt = `${commonChatPrompt}
+const earlyChatPrompt = `${commonChatPrompt}
 
-目前不是第 1 輪。不得再自我介紹，也不得使用「嗨，我是艾可。」。`;
+目前是第 2～10 輪。不得再自我介紹，也不得使用「嗨，我是艾可。」。回覆必須是自然語言，不得使用條列。保持陪伴感，在自然節奏中逐步補齊資訊，不要像問卷。`;
 
-const insightPrompt = `你是 EchoTrail 的結構化洞察引擎。只根據 user 訊息生成 JSON，不得把 model 的推論當成使用者原話。
+const lateChatPrompt = `${commonChatPrompt}
+
+目前是第 11～15 輪。不得再自我介紹，也不得使用「嗨，我是艾可。」。語氣仍親切，但要更積極收斂。如果仍缺少產卡所需內容，可以用簡短條列直接指出缺少的面向並提問；若資料已足夠，要積極邀請使用者點 Generate Insight。不得繼續無限開放式探索。`;
+
+const insightPrompt = `你是 EchoTrail 的 Echo Card 結構化洞察引擎。使用者已點擊 Generate Insight，或對話已到第 16 輪。直接根據完整逐字稿產生正式 Echo Card，不需要等待使用者再次確認。只根據 user 訊息生成 JSON，不得把 model 的推論當成使用者原話。
 
 card 規則：
 - title：具體事件標題，最多 18 個中文字。
@@ -100,26 +124,25 @@ card 規則：
 - like：以「我喜歡／我在意／我適合／我擅長」其中一種開頭。
 - dislike：以「我討厭／我不適合／我不在意／我不擅長」其中一種開頭，且不能只是 like 的反義句。
 - value：第一人稱價值主張。
-- quote：必須逐字複製某一則 user 訊息中的連續片段。
+- quote：必須逐字複製某一則 user 訊息中的連續片段，且至少 4 個文字或數字，空白與符號不計。
 
-signals 規則：
-- 只產生有逐字證據的訊號；不要求每個框架或維度都有資料。
-- framework=riasec 時 dimension 只能是 R/I/A/S/E/C。
-- framework=disc 時 dimension 只能是 D/I/S/C。
-- framework=schein 時 dimension 只能是 technical/managerial/autonomy/security/entrepreneurial/service/challenge/lifestyle。
-- strength 為 1 到 10 的整數。
-- evidenceQuote 必須逐字複製某一則 user 訊息中的連續片段。
+careerAnchorType 只能選一個：專家達人、專業經理人、自主工作者、安穩可靠者、創造者、俠客奉獻者、挑戰者、樂活族。證據不足時使用「無法明確歸類」。
 
-dashboard 規則：
-- persona：headline 是一句人物輪廓；summaries 為 1 到 3 個具體特質；quote 必須是 user 原文。
-- anchor：primary 是最主要的 Schein 職涯錨點；ability、motivation、values 各列 1 到 3 個短句，分別回答「我擅長什麼」「我想要什麼」「我的標準是什麼」。
-- keywords：列出 3 到 8 個對話關鍵詞，weight 為 1 到 5 整數。
-- patterns：列出 1 到 3 個可觀察行為模式，每項 evidenceQuote 必須是 user 原文。
-- northStar：primaryAnchor、簡短 tagline、1 到 3 個 desires、一句 bottomLine、1 到 3 個 nextSteps。nextSteps 只能是從對話合理推得的發展方向，不可捏造經歷。
+輸出格式：{"card":{"title":"","happen":[""],"emotion":"","like":"","dislike":"","value":"","quote":""},"careerAnchorType":"無法明確歸類"}`;
 
-所有 quote 與 evidenceQuote 至少需包含 4 個文字或數字，空白、標點與其他符號不計。
+const dashboardPrompt = `你是 EchoTrail 的 Dashboard 結構化洞察引擎。輸入是同一位使用者目前全部 Echo Card 的 JSON，以及後端依 careerAnchorType 統計出的排序。不要要求或假設存在聊天逐字稿；所有原話證據只能逐字取自各事件 quote 欄位。
 
-輸出格式：{"card":{"title":"","happen":[""],"emotion":"","like":"","dislike":"","value":"","quote":""},"signals":[{"framework":"riasec","dimension":"I","strength":8,"evidenceQuote":""}],"dashboard":{"persona":{"headline":"","summaries":[""],"quote":""},"anchor":{"primary":"","ability":[""],"motivation":[""],"values":[""]},"keywords":[{"text":"","weight":3}],"patterns":[{"title":"","evidenceQuote":""}],"northStar":{"primaryAnchor":"","tagline":"","desires":[""],"bottomLine":"","nextSteps":[""]}}}`;
+請綜合全部事件重新產生一份 Dashboard，而不是只分析最後一筆：
+- signals：只產生有 quote 證據的訊號，證據不足時可以回傳空陣列。framework 與 dimension 只能使用以下組合：riasec 使用 R、I、A、S、E、C；disc 使用 D、I、S、C；schein 使用 technical、managerial、autonomy、security、entrepreneurial、service、challenge、lifestyle。strength 為 1 到 10 整數。
+- signals[].evidenceQuote、persona.quote 與 patterns[].evidenceQuote 必須完整複製 allowedEvidenceQuotes 中某一筆 quote，不得引用 title、happen、emotion、like、dislike、value，不得改寫、縮寫或加上引號。
+- persona：headline 是一句人物輪廓；summaries 為 1 到 3 個具體特質。
+- anchor：primary 優先採職涯錨排序第一名；ability、motivation、values 各列 1 到 3 個短句。
+- keywords：列出 3 到 8 個跨事件關鍵詞，weight 為 1 到 5 整數。
+- patterns：列出 1 到 3 個跨事件可觀察行為模式。
+- northStar：primaryAnchor 必須與 anchor.primary 一致，另產生簡短 tagline、1 到 3 個 desires、一句 bottomLine、1 到 3 個 nextSteps。
+- 不得編造事件、經歷或引言；證據不足時採保守描述。
+
+輸出格式：{"signals":[{"framework":"riasec","dimension":"I","strength":8,"evidenceQuote":""}],"dashboard":{"persona":{"headline":"","summaries":[""],"quote":""},"anchor":{"primary":"","ability":[""],"motivation":[""],"values":[""]},"keywords":[{"text":"","weight":3}],"patterns":[{"title":"","evidenceQuote":""}],"northStar":{"primaryAnchor":"","tagline":"","desires":[""],"bottomLine":"","nextSteps":[""]}}}`;
 
 type GeminiResponse = {
   candidates?: Array<{
@@ -132,7 +155,7 @@ type GeminiResponse = {
 const parseText = (data: GeminiResponse): string => {
   const candidate = data.candidates?.[0];
   if (data.promptFeedback?.blockReason || candidate?.finishReason === 'SAFETY') {
-    throw new LlmError(422, '這段內容無法進行一般職涯分析，請改用其他虛構測試內容。');
+    throw new LlmError(422, '這段內容需要由真人專業資源協助，請優先聯絡當地緊急或心理支持服務。');
   }
   const text = candidate?.content?.parts
     ?.filter((part) => !part.thought && typeof part.text === 'string')
@@ -210,6 +233,14 @@ export const parseMessages = (body: unknown, requireUserEnding = true): ChatMess
   return messages;
 };
 
+const parseJson = (raw: string): unknown => {
+  try {
+    return JSON.parse(raw.replace(/^```json\s*|\s*```$/g, ''));
+  } catch {
+    throw new LlmError(502, '模型產出不是有效 JSON。');
+  }
+};
+
 const normalizedQuote = (quote: string): string => quote.trim();
 const isLongEnoughQuote = (quote: string): boolean =>
   (normalizedQuote(quote).match(/[\p{L}\p{N}]/gu)?.length ?? 0) >= minimumQuoteLength;
@@ -220,7 +251,13 @@ const quotedByUser = (quote: string, messages: ChatMessage[]): boolean => {
     messages.some((message) => message.role === 'user' && message.text.includes(normalized))
   );
 };
-
+const quotedByEvent = (quote: string, events: DashboardEvent[]): boolean => {
+  const normalized = normalizedQuote(quote);
+  return (
+    isLongEnoughQuote(normalized) &&
+    events.some((event) => normalizedQuote(event.quote) === normalized)
+  );
+};
 const isTextArray = (value: unknown, minimum = 1, maximum = 3): value is string[] =>
   Array.isArray(value) &&
   value.length >= minimum &&
@@ -228,18 +265,8 @@ const isTextArray = (value: unknown, minimum = 1, maximum = 3): value is string[
   value.every((item) => typeof item === 'string' && item.trim());
 
 export const parseInsight = (raw: string, messages: ChatMessage[]): InsightResult => {
-  let value: unknown;
-  try {
-    value = JSON.parse(raw.replace(/^```json\s*|\s*```$/g, ''));
-  } catch {
-    throw new LlmError(502, '模型產出不是有效 JSON。');
-  }
-  if (
-    !isRecord(value) ||
-    !isRecord(value.card) ||
-    !Array.isArray(value.signals) ||
-    !isRecord(value.dashboard)
-  ) {
+  const value = parseJson(raw);
+  if (!isRecord(value) || !isRecord(value.card)) {
     throw new LlmError(502, '模型產出缺少必要欄位。');
   }
   const card = value.card;
@@ -251,11 +278,63 @@ export const parseInsight = (raw: string, messages: ChatMessage[]): InsightResul
     card.happen.length > 4 ||
     card.happen.some((item) => typeof item !== 'string' || !item.trim()) ||
     typeof card.quote !== 'string' ||
-    !quotedByUser(card.quote, messages)
+    !quotedByUser(card.quote, messages) ||
+    !careerAnchorTypes.includes(value.careerAnchorType as CareerAnchorType)
   ) {
     throw new LlmError(502, '模型產出的卡片未通過 grounding 驗證。');
   }
-  const signals = value.signals.map((item): InsightSignal => {
+  return {
+    card: {
+      title: String(card.title).trim(),
+      happen: (card.happen as string[]).map((item) => item.trim()),
+      emotion: String(card.emotion).trim(),
+      like: String(card.like).trim(),
+      dislike: String(card.dislike).trim(),
+      value: String(card.value).trim(),
+      quote: String(card.quote).trim(),
+    },
+    careerAnchorType: value.careerAnchorType as CareerAnchorType,
+  };
+};
+
+export const parseDashboardEvents = (body: unknown): DashboardEvent[] => {
+  if (!isRecord(body) || !Array.isArray(body.events) || body.events.length === 0) {
+    throw new LlmError(400, 'Dashboard 歷史事件格式錯誤。');
+  }
+  return body.events.map((item): DashboardEvent => {
+    const textFields = ['title', 'emotion', 'like', 'dislike', 'value', 'quote'] as const;
+    if (
+      !isRecord(item) ||
+      !Number.isInteger(item.eventId) ||
+      textFields.some((field) => typeof item[field] !== 'string' || !item[field].trim()) ||
+      !Array.isArray(item.happen) ||
+      item.happen.length === 0 ||
+      item.happen.length > 4 ||
+      item.happen.some((entry) => typeof entry !== 'string' || !entry.trim()) ||
+      !careerAnchorTypes.includes(item.careerAnchorType as CareerAnchorType)
+    ) {
+      throw new LlmError(400, 'Dashboard 歷史事件格式錯誤。');
+    }
+    return {
+      eventId: item.eventId as number,
+      title: item.title as string,
+      happen: item.happen as string[],
+      emotion: item.emotion as string,
+      like: item.like as string,
+      dislike: item.dislike as string,
+      value: item.value as string,
+      quote: item.quote as string,
+      careerAnchorType: item.careerAnchorType as CareerAnchorType,
+    };
+  });
+};
+
+export const parseDashboard = (raw: string, events: DashboardEvent[]): DashboardResult => {
+  const value = parseJson(raw);
+  if (!isRecord(value) || !Array.isArray(value.signals) || !isRecord(value.dashboard)) {
+    throw new LlmError(502, 'Dashboard 模型產出缺少必要欄位。');
+  }
+  const signals = value.signals.map((item, index): InsightSignal => {
     if (
       !isRecord(item) ||
       !['riasec', 'disc', 'schein'].includes(String(item.framework)) ||
@@ -266,11 +345,20 @@ export const parseInsight = (raw: string, messages: ChatMessage[]): InsightResul
       item.strength > 10 ||
       typeof item.evidenceQuote !== 'string'
     ) {
-      throw new LlmError(502, '模型產出的圖表訊號格式錯誤。');
+      throw new LlmError(502, `signals[${index}] 的欄位格式錯誤。`);
     }
     const framework = item.framework as Framework;
-    if (!dimensions[framework].includes(item.dimension) || !quotedByUser(item.evidenceQuote, messages)) {
-      throw new LlmError(502, '模型產出的圖表訊號未通過 grounding 驗證。');
+    if (!dimensions[framework].includes(item.dimension)) {
+      throw new LlmError(
+        502,
+        `signals[${index}].dimension 必須是 ${framework} 的允許代碼：${dimensions[framework].join('、')}。`,
+      );
+    }
+    if (!quotedByEvent(item.evidenceQuote, events)) {
+      throw new LlmError(
+        502,
+        `signals[${index}].evidenceQuote 必須完整複製 allowedEvidenceQuotes 中的一筆 quote。`,
+      );
     }
     return {
       framework,
@@ -284,12 +372,10 @@ export const parseInsight = (raw: string, messages: ChatMessage[]): InsightResul
     !isRecord(dashboard.persona) ||
     typeof dashboard.persona.headline !== 'string' ||
     !isTextArray(dashboard.persona.summaries) ||
-    typeof dashboard.persona.quote !== 'string'
+    typeof dashboard.persona.quote !== 'string' ||
+    !quotedByEvent(dashboard.persona.quote, events)
   ) {
-    throw new LlmError(502, 'Dashboard persona 格式驗證失敗。');
-  }
-  if (!quotedByUser(dashboard.persona.quote, messages)) {
-    throw new LlmError(502, 'Dashboard persona.quote 不是 user 原文的連續片段。');
+    throw new LlmError(502, 'Dashboard persona 格式或引證驗證失敗。');
   }
   if (
     !isRecord(dashboard.anchor) ||
@@ -326,17 +412,11 @@ export const parseInsight = (raw: string, messages: ChatMessage[]): InsightResul
         isRecord(pattern) &&
         typeof pattern.title === 'string' &&
         pattern.title.trim() &&
-        typeof pattern.evidenceQuote === 'string',
+        typeof pattern.evidenceQuote === 'string' &&
+        quotedByEvent(pattern.evidenceQuote, events),
     )
   ) {
-    throw new LlmError(502, 'Dashboard patterns 格式驗證失敗。');
-  }
-  if (
-    !dashboard.patterns.every((pattern) =>
-      quotedByUser((pattern as { evidenceQuote: string }).evidenceQuote, messages),
-    )
-  ) {
-    throw new LlmError(502, 'Dashboard patterns.evidenceQuote 不是 user 原文的連續片段。');
+    throw new LlmError(502, 'Dashboard patterns 格式或引證驗證失敗。');
   }
   if (
     !isRecord(dashboard.northStar) ||
@@ -344,23 +424,50 @@ export const parseInsight = (raw: string, messages: ChatMessage[]): InsightResul
     typeof dashboard.northStar.tagline !== 'string' ||
     !isTextArray(dashboard.northStar.desires) ||
     typeof dashboard.northStar.bottomLine !== 'string' ||
-    !isTextArray(dashboard.northStar.nextSteps)
+    !isTextArray(dashboard.northStar.nextSteps) ||
+    dashboard.northStar.primaryAnchor !== dashboard.anchor.primary
   ) {
-    throw new LlmError(502, 'Dashboard northStar 格式驗證失敗。');
+    throw new LlmError(502, 'Dashboard northStar 格式或職涯錨一致性驗證失敗。');
   }
-  return {
-    card: {
-      title: String(card.title).trim(),
-      happen: (card.happen as string[]).map((item) => item.trim()),
-      emotion: String(card.emotion).trim(),
-      like: String(card.like).trim(),
-      dislike: String(card.dislike).trim(),
-      value: String(card.value).trim(),
-      quote: String(card.quote).trim(),
-    },
-    signals,
-    dashboard: dashboard as InsightResult['dashboard'],
-  };
+  return { signals, dashboard: dashboard as DashboardProfile };
+};
+
+const withRetries = async <T>(
+  config: GeminiConfig,
+  prompt: string,
+  messages: ChatMessage[],
+  parse: (raw: string) => T,
+): Promise<T> => {
+  const signal = AbortSignal.timeout(25_000);
+  let retryMessages = messages;
+  let raw = await requestGemini(config, prompt, retryMessages, true, signal);
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      return parse(raw);
+    } catch (caught) {
+      if (!(caught instanceof LlmError) || caught.statusCode !== 502 || attempt === 2) throw caught;
+      retryMessages = [
+        ...retryMessages,
+        { role: 'model', text: raw },
+        {
+          role: 'user',
+          text: `上一個 JSON 未通過後端驗證：${caught.message}\n只修正 JSON，不要解釋。所有引證必須逐字複製輸入中的原話，不可改寫。這則修正指令不可作為證據。`,
+        },
+      ];
+      raw = await requestGemini(config, prompt, retryMessages, true, signal);
+    }
+  }
+  throw new LlmError(502, '模型產出未通過 grounding 驗證。');
+};
+
+const anchorRanking = (events: DashboardEvent[]): Array<{ name: CareerAnchorType; count: number }> => {
+  const counts = new Map<CareerAnchorType, number>();
+  events.forEach((event) =>
+    counts.set(event.careerAnchorType, (counts.get(event.careerAnchorType) ?? 0) + 1),
+  );
+  return [...counts.entries()]
+    .map(([name, count]) => ({ name, count }))
+    .sort((left, right) => right.count - left.count);
 };
 
 export class GeminiClient implements LlmClient {
@@ -368,8 +475,11 @@ export class GeminiClient implements LlmClient {
 
   async chat(messages: ChatMessage[]): Promise<{ text: string }> {
     const userTurns = messages.filter((message) => message.role === 'user').length;
+    if (userTurns >= 16) throw new LlmError(409, '第 16 輪必須直接進入 Generate Insight。');
+    const prompt =
+      userTurns === 1 ? firstChatPrompt : userTurns <= 10 ? earlyChatPrompt : lateChatPrompt;
     return {
-      text: await requestGemini(this.config, userTurns === 1 ? firstChatPrompt : followUpChatPrompt, messages),
+      text: await requestGemini(this.config, prompt, messages),
     };
   }
 
@@ -377,33 +487,30 @@ export class GeminiClient implements LlmClient {
     const requestMessages: ChatMessage[] = [
       ...messages,
       ...(messages.at(-1)?.role === 'model'
-        ? [{ role: 'user' as const, text: '請根據以上逐字稿產生結構化洞察 JSON。這句系統觸發文字不可作為證據。' }]
+        ? [{ role: 'user' as const, text: '請根據以上逐字稿直接產生正式 Echo Card JSON。這句系統觸發文字不可作為證據。' }]
         : []),
     ];
-    const signal = AbortSignal.timeout(25_000);
-    let retryMessages = requestMessages;
-    let raw = await requestGemini(this.config, insightPrompt, retryMessages, true, signal);
-    for (let attempt = 0; attempt < 3; attempt += 1) {
-      try {
-        return parseInsight(raw, messages);
-      } catch (caught) {
-        if (!(caught instanceof LlmError) || caught.statusCode !== 502 || attempt === 2) {
-          throw caught;
-        }
-        const correction = [
-          '上一個 JSON 未通過後端驗證，錯誤類型如下：',
-          caught.message,
-          '只修正 JSON，不要解釋。quote 與每個 evidenceQuote 必須從最初 user 逐字稿完整複製連續片段，不可改寫、加省略號或替換標點。',
-          '這則修正指令不是使用者逐字稿，不可作為證據。',
-        ].join('\n');
-        retryMessages = [
-          ...retryMessages,
-          { role: 'model', text: raw },
-          { role: 'user', text: correction },
-        ];
-        raw = await requestGemini(this.config, insightPrompt, retryMessages, true, signal);
-      }
-    }
-    throw new LlmError(502, '模型產出未通過 grounding 驗證。');
+    return withRetries(this.config, insightPrompt, requestMessages, (raw) =>
+      parseInsight(raw, messages),
+    );
+  }
+
+  async dashboard(events: DashboardEvent[]): Promise<DashboardResult> {
+    const allowedEvidenceQuotes = events.map(({ eventId, quote }) => ({ eventId, quote }));
+    return withRetries(
+      this.config,
+      dashboardPrompt,
+      [
+        {
+          role: 'user',
+          text: JSON.stringify({
+            events,
+            careerAnchorRanking: anchorRanking(events),
+            allowedEvidenceQuotes,
+          }),
+        },
+      ],
+      (raw) => parseDashboard(raw, events),
+    );
   }
 }

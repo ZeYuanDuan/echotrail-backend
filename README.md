@@ -16,7 +16,7 @@ EchoTrail 的後端服務。
 - `POST /api/llm/chat`：接收交替的多輪對話，回傳艾可的下一則回覆。
 - `POST /api/llm/insight`：從完整對話產生 grounded Echo Card 與 Dashboard 訊號。
 
-LLM 路由需要服務端環境變數 `GEMINI_API_KEY`；可用 `GEMINI_MODEL` 覆寫模型。金鑰不得放入前端或提交至 Git。產卡 API 會驗證卡片引證與所有圖表訊號的 `evidenceQuote` 都是使用者原文的連續片段，格式或 grounding 不合格時會將失敗 JSON 與具體驗證原因回饋給模型，最多修正重試兩次。
+LLM 路由需要服務端環境變數 `GEMINI_API_KEY`；可用 `GEMINI_MODEL` 覆寫模型。金鑰不得放入前端或提交至 Git。產卡 API 會驗證卡片引證是使用者原文的連續片段；Dashboard API 則要求 Persona、行為模式與圖表訊號的引證完整複製事件引言白名單。格式或 grounding 不合格時會將欄位索引、允許代碼等具體原因回饋給模型，最多修正重試兩次。
 
 ## 本機開發
 
