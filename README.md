@@ -16,16 +16,16 @@ Cloud SQL PostgreSQL 的部署前檢查與 Cloud Run 連線設定見 [Cloud SQL 
 
 - `GET /health`：公開健康檢查。
 - `POST /api/llm/chat`：接收交替的多輪對話，回傳艾可的下一則回覆。
-- `POST /api/llm/insight`：從完整對話產生 grounded Echo Card 與 Dashboard 訊號。
+- `POST /api/llm/insight`：從完整對話產生 grounded Echo Card 與事件層級框架訊號，不產生 Dashboard profile。
 - `POST /api/users`：以正規化暱稱查找或建立展示使用者，回傳 `{id,name}`。
 - `POST /api/events`：確認卡片，原子寫入事件、洞見、對話片段及訊號；新建為 201，冪等重試為 200。
 - `GET /api/events?userId=<uuid>`：依資料庫 `created_at,id` 順序讀取該使用者的已確認事件。
 - `POST /api/dashboard/rebuild`：以 `{userId}` 明確要求全量重算，成功後保存新快照；無事件或來源版本變更為 409。
 - `GET /api/dashboard?userId=<uuid>`：只讀取最新成功快照，尚無快照時回傳 `{dashboard:null}`。
 
-暱稱只用於工程展示，**不提供認證**；知道 user ID 的呼叫者可讀取該使用者資料。公開部署前須依產品需求加上真正的認證與授權。卡片預覽不寫入資料庫；確認後 My Trail 可立即讀取，Dashboard 仍保持上次快照，直到使用者按「更新至 Dashboard」。事件是附加式資料，Dashboard run 是可重算的衍生快照。框架分數目前是訊號強度平均乘 10 的展示預覽，非 C-7～C-9 最終計分。
+暱稱只用於工程展示，**不提供認證**；知道 user ID 的呼叫者可讀取該使用者資料。公開部署前須依產品需求加上真正的認證與授權。卡片預覽不寫入資料庫；確認後 My Trail 可立即讀取，前端會接著重算 Dashboard，失敗時仍保留事件供使用者重試。事件是附加式資料，Dashboard run 是可重算的衍生快照。框架分數目前是訊號強度平均乘 10 的展示預覽，非 C-7～C-9 最終計分。
 
-LLM 路由需要服務端環境變數 `GEMINI_API_KEY`；可用 `GEMINI_MODEL` 覆寫模型。金鑰不得放入前端或提交至 Git。產卡 API 會驗證卡片引證是使用者原文的連續片段；Dashboard API 則要求 Persona、行為模式與圖表訊號的引證完整複製事件引言白名單。格式或 grounding 不合格時會將欄位索引、允許代碼等具體原因回饋給模型，最多修正重試兩次。
+LLM 路由需要服務端環境變數 `GEMINI_API_KEY`；可用 `GEMINI_MODEL` 覆寫模型。金鑰不得放入前端或提交至 Git。產卡 API 會驗證卡片與每個事件訊號的引證都是使用者原文的連續片段。Dashboard rebuild 會先為已驗證的使用者原文建立 `quoteOptions`，模型只能回傳其中的 `quoteId`，再由後端還原 Persona 與行為模式引文；模型無法直接寫入任意引文。Gemini structured output schema 會在生成階段限制必要欄位、陣列數量、權重及可選 quote ID，後端仍在儲存前執行獨立驗證；可安全修正的超量清單會確定性截斷。格式或 grounding 不合格時會將具體原因回饋給模型，最多修正重試兩次，每次請求使用獨立逾時。
 
 ## 本機開發
 

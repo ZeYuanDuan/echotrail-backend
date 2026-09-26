@@ -1,4 +1,4 @@
-import type { ChatMessage, InsightResult, InsightSignal } from '../llm.js';
+import type { ChatMessage, DashboardProfile, InsightResult, InsightSignal } from '../llm.js';
 
 export type CardFields = InsightResult['card'];
 export type EditedField = 'title' | 'happen' | 'emotion' | 'like' | 'dislike' | 'value' | 'quote';
@@ -41,6 +41,6 @@ export type DashboardSnapshot = {
   createdAt: string;
   sourceRevision: number;
   sourceEventCount: number;
-  profile: InsightResult['dashboard'];
+  profile: DashboardProfile;
   frameworks: DashboardFrameworks;
 };

@@ -17,6 +17,20 @@ export type InsightSignal = {
   evidenceQuote: string;
 };
 
+export type DashboardProfile = {
+  persona: { headline: string; summaries: string[]; quote: string };
+  anchor: { primary: string; ability: string[]; motivation: string[]; values: string[] };
+  keywords: Array<{ text: string; weight: number }>;
+  patterns: Array<{ title: string; evidenceQuote: string }>;
+  northStar: {
+    primaryAnchor: string;
+    tagline: string;
+    desires: string[];
+    bottomLine: string;
+    nextSteps: string[];
+  };
+};
+
 export type InsightResult = {
   card: {
     title: string;
@@ -28,19 +42,6 @@ export type InsightResult = {
     quote: string;
   };
   signals: InsightSignal[];
-  dashboard: {
-    persona: { headline: string; summaries: string[]; quote: string };
-    anchor: { primary: string; ability: string[]; motivation: string[]; values: string[] };
-    keywords: Array<{ text: string; weight: number }>;
-    patterns: Array<{ title: string; evidenceQuote: string }>;
-    northStar: {
-      primaryAnchor: string;
-      tagline: string;
-      desires: string[];
-      bottomLine: string;
-      nextSteps: string[];
-    };
-  };
 };
 
 export class LlmError extends Error {
@@ -55,7 +56,7 @@ export class LlmError extends Error {
 export interface LlmClient {
   chat(messages: ChatMessage[]): Promise<{ text: string }>;
   insight(messages: ChatMessage[]): Promise<InsightResult>;
-  synthesizeDashboard(evidence: DashboardEvidence[]): Promise<InsightResult['dashboard']>;
+  synthesizeDashboard(evidence: DashboardEvidence[]): Promise<DashboardProfile>;
 }
 
 export const dimensions: Record<Framework, readonly string[]> = {
@@ -119,18 +120,32 @@ signals 規則：
 - framework=disc 時 dimension 只能是 D/I/S/C。
 - framework=schein 時 dimension 只能是 technical/managerial/autonomy/security/entrepreneurial/service/challenge/lifestyle。
 - strength 為 1 到 10 的整數。
-- evidenceQuote 必須逐字複製某一則 user 訊息中的連續片段。
+- evidenceQuote 必須逐字複製某一則 user 訊息中的連續片段，且至少 4 個文字或數字，空白與符號不計。
 
-dashboard 規則：
-- persona：headline 是一句人物輪廓；summaries 為 1 到 3 個具體特質；quote 必須是 user 原文。
-- anchor：primary 是最主要的 Schein 職涯錨點；ability、motivation、values 各列 1 到 3 個短句，分別回答「我擅長什麼」「我想要什麼」「我的標準是什麼」。
-- keywords：列出 3 到 8 個對話關鍵詞，weight 為 1 到 5 整數。
-- patterns：列出 1 到 3 個可觀察行為模式，每項 evidenceQuote 必須是 user 原文。
-- northStar：primaryAnchor、簡短 tagline、1 到 3 個 desires、一句 bottomLine、1 到 3 個 nextSteps。nextSteps 只能是從對話合理推得的發展方向，不可捏造經歷。
+輸出格式：{"card":{"title":"","happen":[""],"emotion":"","like":"","dislike":"","value":"","quote":""},"signals":[{"framework":"riasec","dimension":"I","strength":8,"evidenceQuote":""}]}`;
 
-輸出格式：{"card":{"title":"","happen":[""],"emotion":"","like":"","dislike":"","value":"","quote":""},"signals":[{"framework":"riasec","dimension":"I","strength":8,"evidenceQuote":""}],"dashboard":{"persona":{"headline":"","summaries":[""],"quote":""},"anchor":{"primary":"","ability":[""],"motivation":[""],"values":[""]},"keywords":[{"text":"","weight":3}],"patterns":[{"title":"","evidenceQuote":""}],"northStar":{"primaryAnchor":"","tagline":"","desires":[""],"bottomLine":"","nextSteps":[""]}}}`;
+const dashboardLimits = {
+  textListMinimum: 1,
+  textListMaximum: 3,
+  keywordsMinimum: 1,
+  keywordsMaximum: 12,
+  keywordWeightMinimum: 1,
+  keywordWeightMaximum: 5,
+  patternsMinimum: 1,
+  patternsMaximum: 5,
+} as const;
 
-const dashboardPrompt = `你是 EchoTrail 的整體職涯洞察引擎。輸入是使用者全部已確認事件、卡片、逐字訊息及訊號。只以這些資料綜合整體歷史，不捏造經歷。輸出單一 JSON 物件，最外層必須直接包含 persona、anchor、keywords、patterns、northStar 五個欄位；不要包在 dashboard、card 或其他欄位下。persona 包含 headline、summaries、quote；anchor 包含 primary、ability、motivation、values；keywords 是含 text、weight 的陣列；patterns 是含 title、evidenceQuote 的陣列；northStar 包含 primaryAnchor、tagline、desires、bottomLine、nextSteps。persona.quote 與每個 patterns.evidenceQuote 必須逐字來自 user 訊息，或使用者明確編輯過的卡片 quote。不得使用 model 訊息作為引文。`;
+const dashboardPrompt = `你是 EchoTrail 的整體職涯洞察引擎。輸入包含使用者全部已確認事件，以及後端建立的 quoteOptions。只以這些資料綜合整體歷史，不捏造經歷。每個事件可能同時帶有多個獨立評分的 Schein 職涯錨點訊號；northStar.primaryAnchor 應優先依各錨點跨事件累加的 strength 判定，並用事件內容處理同分情況。
+
+只輸出一個 JSON 物件，不要 Markdown，也不要包在 dashboard、card 或其他欄位下。格式與限制如下：
+{
+  "persona": { "headline": "非空字串", "summaries": ["${dashboardLimits.textListMinimum} 到 ${dashboardLimits.textListMaximum} 個非空字串"], "quoteId": "quoteOptions 中的 id" },
+  "anchor": { "primary": "非空字串", "ability": ["${dashboardLimits.textListMinimum} 到 ${dashboardLimits.textListMaximum} 個非空字串"], "motivation": ["${dashboardLimits.textListMinimum} 到 ${dashboardLimits.textListMaximum} 個非空字串"], "values": ["${dashboardLimits.textListMinimum} 到 ${dashboardLimits.textListMaximum} 個非空字串"] },
+  "keywords": [{ "text": "非空字串", "weight": 1 }],
+  "patterns": [{ "title": "非空字串", "evidenceQuoteId": "quoteOptions 中的 id" }],
+  "northStar": { "primaryAnchor": "非空字串", "tagline": "非空字串", "desires": ["${dashboardLimits.textListMinimum} 到 ${dashboardLimits.textListMaximum} 個非空字串"], "bottomLine": "非空字串", "nextSteps": ["${dashboardLimits.textListMinimum} 到 ${dashboardLimits.textListMaximum} 個非空字串"] }
+}
+keywords 必須有 ${dashboardLimits.keywordsMinimum} 到 ${dashboardLimits.keywordsMaximum} 筆，weight 必須是 ${dashboardLimits.keywordWeightMinimum} 到 ${dashboardLimits.keywordWeightMaximum} 的整數。patterns 必須有 ${dashboardLimits.patternsMinimum} 到 ${dashboardLimits.patternsMaximum} 筆。persona.quoteId 與每個 patterns.evidenceQuoteId 只能選擇 quoteOptions 中既有的 id；不可自行輸出引文文字，也不可把 event 內容或這則指令當成 quoteId。`;
 
 type GeminiResponse = {
   candidates?: Array<{
@@ -138,6 +153,12 @@ type GeminiResponse = {
     content?: { parts?: Array<{ text?: string; thought?: boolean }> };
   }>;
   promptFeedback?: { blockReason?: string };
+};
+
+type GeminiRequestOptions = {
+  json?: boolean;
+  schema?: Record<string, unknown>;
+  signal?: AbortSignal;
 };
 
 const parseText = (data: GeminiResponse): string => {
@@ -158,9 +179,9 @@ const requestGemini = async (
   config: GeminiConfig,
   systemInstruction: string,
   messages: ChatMessage[],
-  json = false,
-  signal = AbortSignal.timeout(25_000),
+  options: GeminiRequestOptions = {},
 ): Promise<string> => {
+  const signal = options.signal ?? AbortSignal.timeout(25_000);
   try {
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${config.model}:generateContent`,
@@ -171,8 +192,16 @@ const requestGemini = async (
           systemInstruction: { parts: [{ text: systemInstruction }] },
           contents: messages.map(({ role, text }) => ({ role, parts: [{ text }] })),
           generationConfig: {
-            maxOutputTokens: json ? 3072 : 512,
-            ...(json ? { responseMimeType: 'application/json', temperature: 0.2 } : {}),
+            maxOutputTokens: options.json ? 3072 : 512,
+            ...(options.schema
+              ? {
+                  responseMimeType: 'application/json',
+                  responseJsonSchema: options.schema,
+                  temperature: 0.2,
+                }
+              : options.json
+                ? { responseMimeType: 'application/json', temperature: 0.2 }
+                : {}),
           },
         }),
         signal,
@@ -232,13 +261,138 @@ const quotedByUser = (quote: string, messages: ChatMessage[]): boolean => {
   );
 };
 
-const isTextArray = (value: unknown, minimum = 1, maximum = 3): value is string[] =>
+const isTextArray = (
+  value: unknown,
+  minimum = dashboardLimits.textListMinimum,
+  maximum = dashboardLimits.textListMaximum,
+): value is string[] =>
   Array.isArray(value) &&
   value.length >= minimum &&
   value.length <= maximum &&
   value.every((item) => typeof item === 'string' && item.trim());
 
 const dashboardFields = ['persona', 'anchor', 'keywords', 'patterns', 'northStar'] as const;
+type DashboardQuoteOption = { id: string; text: string };
+
+const dashboardQuoteOptions = (evidence: DashboardEvidence[]): DashboardQuoteOption[] => {
+  const texts = new Set<string>();
+  for (const event of evidence) {
+    const cardQuoteAllowed = event.quoteSource === 'user_edit' || event.messages.some((message) =>
+      message.role === 'user' && message.text.includes(event.card.quote));
+    if (cardQuoteAllowed && event.card.quote.trim()) texts.add(event.card.quote);
+    for (const signal of event.signals) {
+      if (event.messages.some((message) => message.role === 'user' && message.text.includes(signal.evidenceQuote))) {
+        texts.add(signal.evidenceQuote);
+      }
+    }
+    for (const message of event.messages) {
+      if (message.role === 'user' && message.text.trim()) texts.add(message.text);
+    }
+  }
+  return Array.from(texts, (text, index) => ({ id: `q${index + 1}`, text }));
+};
+
+const dashboardRequestPayload = (evidence: DashboardEvidence[], quoteOptions: DashboardQuoteOption[]): unknown => ({
+  events: evidence.map((event) => ({
+    eventId: event.eventId,
+    title: event.title,
+    card: {
+      happen: event.card.happen,
+      emotion: event.card.emotion,
+      like: event.card.like,
+      dislike: event.card.dislike,
+      value: event.card.value,
+    },
+    userMessages: event.messages
+      .filter((message) => message.role === 'user')
+      .map((message) => message.text),
+    signals: event.signals,
+  })),
+  quoteOptions,
+});
+
+const dashboardResponseSchema = (quoteOptions: DashboardQuoteOption[]): Record<string, unknown> => {
+  const textList = {
+    type: 'array',
+    items: { type: 'string' },
+    minItems: dashboardLimits.textListMinimum,
+    maxItems: dashboardLimits.textListMaximum,
+  };
+  const quoteId = { type: 'string', enum: quoteOptions.map((option) => option.id) };
+  return {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      persona: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          headline: { type: 'string' },
+          summaries: textList,
+          quoteId,
+        },
+        required: ['headline', 'summaries', 'quoteId'],
+      },
+      anchor: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          primary: { type: 'string' },
+          ability: textList,
+          motivation: textList,
+          values: textList,
+        },
+        required: ['primary', 'ability', 'motivation', 'values'],
+      },
+      keywords: {
+        type: 'array',
+        minItems: dashboardLimits.keywordsMinimum,
+        maxItems: dashboardLimits.keywordsMaximum,
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            text: { type: 'string' },
+            weight: {
+              type: 'integer',
+              minimum: dashboardLimits.keywordWeightMinimum,
+              maximum: dashboardLimits.keywordWeightMaximum,
+            },
+          },
+          required: ['text', 'weight'],
+        },
+      },
+      patterns: {
+        type: 'array',
+        minItems: dashboardLimits.patternsMinimum,
+        maxItems: dashboardLimits.patternsMaximum,
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            title: { type: 'string' },
+            evidenceQuoteId: quoteId,
+          },
+          required: ['title', 'evidenceQuoteId'],
+        },
+      },
+      northStar: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          primaryAnchor: { type: 'string' },
+          tagline: { type: 'string' },
+          desires: textList,
+          bottomLine: { type: 'string' },
+          nextSteps: textList,
+        },
+        required: ['primaryAnchor', 'tagline', 'desires', 'bottomLine', 'nextSteps'],
+      },
+    },
+    required: ['persona', 'anchor', 'keywords', 'patterns', 'northStar'],
+  };
+};
+
 const fieldType = (value: unknown): string =>
   value === undefined ? 'missing' : value === null ? 'null' : Array.isArray(value) ? 'array' : typeof value;
 
@@ -253,7 +407,7 @@ const dashboardResponseShape = (raw: string): Record<string, unknown> => {
   return { root: types(root), dashboard: fieldType(root.dashboard), wrapped: types(wrapped) };
 };
 
-export function parseDashboardProfile(raw: string, evidence: DashboardEvidence[]): InsightResult['dashboard'] {
+export function parseDashboardProfile(raw: string, evidence: DashboardEvidence[]): DashboardProfile {
   let value: unknown;
   try { value = JSON.parse(raw.replace(/^```json\s*|\s*```$/g, '')); }
   catch { throw new LlmError(502, 'Dashboard 模型產出不是有效 JSON。'); }
@@ -269,16 +423,121 @@ export function parseDashboardProfile(raw: string, evidence: DashboardEvidence[]
   const persona = value.persona;
   const anchor = value.anchor;
   const northStar = value.northStar;
-  if (typeof persona.headline !== 'string' || !persona.headline.trim() || !isTextArray(persona.summaries) || !quoted(persona.quote) ||
-    typeof anchor.primary !== 'string' || !anchor.primary.trim() || !isTextArray(anchor.ability) || !isTextArray(anchor.motivation) || !isTextArray(anchor.values) ||
-    value.keywords.length < 1 || value.keywords.length > 12 || !value.keywords.every((item) => isRecord(item) && typeof item.text === 'string' && !!item.text.trim() && Number.isInteger(item.weight) && (item.weight as number) >= 1 && (item.weight as number) <= 5) ||
-    value.patterns.length < 1 || value.patterns.length > 5 || !value.patterns.every((item) => isRecord(item) && typeof item.title === 'string' && !!item.title.trim() && quoted(item.evidenceQuote)) ||
-    typeof northStar.primaryAnchor !== 'string' || !northStar.primaryAnchor.trim() || typeof northStar.tagline !== 'string' || !northStar.tagline.trim() ||
-    !isTextArray(northStar.desires) || typeof northStar.bottomLine !== 'string' || !northStar.bottomLine.trim() || !isTextArray(northStar.nextSteps)) {
-    throw new LlmError(502, 'Dashboard 模型產出未通過格式或原文驗證。');
+  const requireText = (value: unknown, path: string): void => {
+    if (typeof value !== 'string' || !value.trim()) throw new LlmError(502, `${path} 必須是非空字串。`);
+  };
+  const requireTexts = (value: unknown, path: string): void => {
+    if (!isTextArray(value)) {
+      throw new LlmError(
+        502,
+        `${path} 必須包含 ${dashboardLimits.textListMinimum} 到 ${dashboardLimits.textListMaximum} 個非空字串。`,
+      );
+    }
+  };
+  requireText(persona.headline, 'persona.headline');
+  requireTexts(persona.summaries, 'persona.summaries');
+  if (!quoted(persona.quote)) throw new LlmError(502, 'persona.quote 必須逐字複製允許的使用者原文。');
+  requireText(anchor.primary, 'anchor.primary');
+  requireTexts(anchor.ability, 'anchor.ability');
+  requireTexts(anchor.motivation, 'anchor.motivation');
+  requireTexts(anchor.values, 'anchor.values');
+  if (value.keywords.length < dashboardLimits.keywordsMinimum || value.keywords.length > dashboardLimits.keywordsMaximum) {
+    throw new LlmError(
+      502,
+      `keywords 必須包含 ${dashboardLimits.keywordsMinimum} 到 ${dashboardLimits.keywordsMaximum} 筆。`,
+    );
   }
-  return value as InsightResult['dashboard'];
+  value.keywords.forEach((item, index) => {
+    if (!isRecord(item)) throw new LlmError(502, `keywords[${index}] 必須是物件。`);
+    requireText(item.text, `keywords[${index}].text`);
+    if (!Number.isInteger(item.weight) ||
+      (item.weight as number) < dashboardLimits.keywordWeightMinimum ||
+      (item.weight as number) > dashboardLimits.keywordWeightMaximum) {
+      throw new LlmError(
+        502,
+        `keywords[${index}].weight 必須是 ${dashboardLimits.keywordWeightMinimum} 到 ${dashboardLimits.keywordWeightMaximum} 的整數。`,
+      );
+    }
+  });
+  if (value.patterns.length < dashboardLimits.patternsMinimum || value.patterns.length > dashboardLimits.patternsMaximum) {
+    throw new LlmError(
+      502,
+      `patterns 必須包含 ${dashboardLimits.patternsMinimum} 到 ${dashboardLimits.patternsMaximum} 筆。`,
+    );
+  }
+  value.patterns.forEach((item, index) => {
+    if (!isRecord(item)) throw new LlmError(502, `patterns[${index}] 必須是物件。`);
+    requireText(item.title, `patterns[${index}].title`);
+    if (!quoted(item.evidenceQuote)) {
+      throw new LlmError(502, `patterns[${index}].evidenceQuote 必須逐字複製允許的使用者原文。`);
+    }
+  });
+  requireText(northStar.primaryAnchor, 'northStar.primaryAnchor');
+  requireText(northStar.tagline, 'northStar.tagline');
+  requireTexts(northStar.desires, 'northStar.desires');
+  requireText(northStar.bottomLine, 'northStar.bottomLine');
+  requireTexts(northStar.nextSteps, 'northStar.nextSteps');
+  return value as DashboardProfile;
 }
+
+const parseDashboardModelProfile = (
+  raw: string,
+  evidence: DashboardEvidence[],
+  quoteOptions: DashboardQuoteOption[],
+): DashboardProfile => {
+  let value: unknown;
+  try { value = JSON.parse(raw.replace(/^```json\s*|\s*```$/g, '')); }
+  catch { throw new LlmError(502, 'Dashboard 模型產出不是有效 JSON。'); }
+  if (isRecord(value)) {
+    const root = value;
+    if (isRecord(root.dashboard) && dashboardFields.every((field) => !(field in root))) value = root.dashboard;
+  }
+  if (!isRecord(value) || !isRecord(value.persona) || !Array.isArray(value.patterns)) {
+    throw new LlmError(502, 'Dashboard 模型產出缺少欄位。');
+  }
+  const quotes = new Map(quoteOptions.map((option) => [option.id, option.text]));
+  const quoteFor = (id: unknown, path: string): string => {
+    if (typeof id !== 'string' || !quotes.has(id)) {
+      throw new LlmError(502, `${path} 必須引用 quoteOptions 中既有的 id。`);
+    }
+    return quotes.get(id)!;
+  };
+  const capped = (items: unknown, maximum: number): unknown =>
+    Array.isArray(items) ? items.slice(0, maximum) : items;
+  const anchor = isRecord(value.anchor)
+    ? {
+        ...value.anchor,
+        ability: capped(value.anchor.ability, dashboardLimits.textListMaximum),
+        motivation: capped(value.anchor.motivation, dashboardLimits.textListMaximum),
+        values: capped(value.anchor.values, dashboardLimits.textListMaximum),
+      }
+    : value.anchor;
+  const northStar = isRecord(value.northStar)
+    ? {
+        ...value.northStar,
+        desires: capped(value.northStar.desires, dashboardLimits.textListMaximum),
+        nextSteps: capped(value.northStar.nextSteps, dashboardLimits.textListMaximum),
+      }
+    : value.northStar;
+  const profile = {
+    persona: {
+      headline: value.persona.headline,
+      summaries: capped(value.persona.summaries, dashboardLimits.textListMaximum),
+      quote: quoteFor(value.persona.quoteId, 'persona.quoteId'),
+    },
+    anchor,
+    keywords: capped(value.keywords, dashboardLimits.keywordsMaximum),
+    patterns: value.patterns.slice(0, dashboardLimits.patternsMaximum).map((pattern, index) => {
+      if (!isRecord(pattern)) throw new LlmError(502, `patterns[${index}] 必須是物件。`);
+      return {
+        title: pattern.title,
+        evidenceQuote: quoteFor(pattern.evidenceQuoteId, `patterns[${index}].evidenceQuoteId`),
+      };
+    }),
+    northStar,
+  };
+  return parseDashboardProfile(JSON.stringify(profile), evidence);
+};
 
 export const parseInsight = (raw: string, messages: ChatMessage[]): InsightResult => {
   let value: unknown;
@@ -290,8 +549,7 @@ export const parseInsight = (raw: string, messages: ChatMessage[]): InsightResul
   if (
     !isRecord(value) ||
     !isRecord(value.card) ||
-    !Array.isArray(value.signals) ||
-    !isRecord(value.dashboard)
+    !Array.isArray(value.signals)
   ) {
     throw new LlmError(502, '模型產出缺少必要欄位。');
   }
@@ -308,7 +566,7 @@ export const parseInsight = (raw: string, messages: ChatMessage[]): InsightResul
   ) {
     throw new LlmError(502, '模型產出的卡片未通過 grounding 驗證。');
   }
-  const signals = value.signals.map((item): InsightSignal => {
+  const signals = value.signals.map((item, index): InsightSignal => {
     if (
       !isRecord(item) ||
       !['riasec', 'disc', 'schein'].includes(String(item.framework)) ||
@@ -319,11 +577,20 @@ export const parseInsight = (raw: string, messages: ChatMessage[]): InsightResul
       item.strength > 10 ||
       typeof item.evidenceQuote !== 'string'
     ) {
-      throw new LlmError(502, '模型產出的圖表訊號格式錯誤。');
+      throw new LlmError(502, `signals[${index}] 的欄位格式錯誤。`);
     }
     const framework = item.framework as Framework;
-    if (!dimensions[framework].includes(item.dimension) || !quotedByUser(item.evidenceQuote, messages)) {
-      throw new LlmError(502, '模型產出的圖表訊號未通過 grounding 驗證。');
+    if (!dimensions[framework].includes(item.dimension)) {
+      throw new LlmError(
+        502,
+        `signals[${index}].dimension 必須是 ${framework} 的允許代碼：${dimensions[framework].join('、')}。`,
+      );
+    }
+    if (!quotedByUser(item.evidenceQuote, messages)) {
+      throw new LlmError(
+        502,
+        `signals[${index}].evidenceQuote 必須逐字複製一則 user 訊息中至少 4 個文字或數字的連續片段。`,
+      );
     }
     return {
       framework,
@@ -332,74 +599,9 @@ export const parseInsight = (raw: string, messages: ChatMessage[]): InsightResul
       evidenceQuote: item.evidenceQuote,
     };
   });
-  const dashboard = value.dashboard;
-  if (
-    !isRecord(dashboard.persona) ||
-    typeof dashboard.persona.headline !== 'string' ||
-    !isTextArray(dashboard.persona.summaries) ||
-    typeof dashboard.persona.quote !== 'string'
-  ) {
-    throw new LlmError(502, 'Dashboard persona 格式驗證失敗。');
-  }
-  if (!quotedByUser(dashboard.persona.quote, messages)) {
-    throw new LlmError(502, 'Dashboard persona.quote 不是 user 原文的連續片段。');
-  }
-  if (
-    !isRecord(dashboard.anchor) ||
-    typeof dashboard.anchor.primary !== 'string' ||
-    !isTextArray(dashboard.anchor.ability) ||
-    !isTextArray(dashboard.anchor.motivation) ||
-    !isTextArray(dashboard.anchor.values)
-  ) {
-    throw new LlmError(502, 'Dashboard anchor 格式驗證失敗。');
-  }
-  if (
-    !Array.isArray(dashboard.keywords) ||
-    dashboard.keywords.length < 3 ||
-    dashboard.keywords.length > 8 ||
-    !dashboard.keywords.every(
-      (keyword) =>
-        isRecord(keyword) &&
-        typeof keyword.text === 'string' &&
-        keyword.text.trim() &&
-        typeof keyword.weight === 'number' &&
-        Number.isInteger(keyword.weight) &&
-        keyword.weight >= 1 &&
-        keyword.weight <= 5,
-    )
-  ) {
-    throw new LlmError(502, 'Dashboard keywords 格式驗證失敗。');
-  }
-  if (
-    !Array.isArray(dashboard.patterns) ||
-    dashboard.patterns.length < 1 ||
-    dashboard.patterns.length > 3 ||
-    !dashboard.patterns.every(
-      (pattern) =>
-        isRecord(pattern) &&
-        typeof pattern.title === 'string' &&
-        pattern.title.trim() &&
-        typeof pattern.evidenceQuote === 'string',
-    )
-  ) {
-    throw new LlmError(502, 'Dashboard patterns 格式驗證失敗。');
-  }
-  if (
-    !dashboard.patterns.every((pattern) =>
-      quotedByUser((pattern as { evidenceQuote: string }).evidenceQuote, messages),
-    )
-  ) {
-    throw new LlmError(502, 'Dashboard patterns.evidenceQuote 不是 user 原文的連續片段。');
-  }
-  if (
-    !isRecord(dashboard.northStar) ||
-    typeof dashboard.northStar.primaryAnchor !== 'string' ||
-    typeof dashboard.northStar.tagline !== 'string' ||
-    !isTextArray(dashboard.northStar.desires) ||
-    typeof dashboard.northStar.bottomLine !== 'string' ||
-    !isTextArray(dashboard.northStar.nextSteps)
-  ) {
-    throw new LlmError(502, 'Dashboard northStar 格式驗證失敗。');
+  const signalKeys = signals.map((signal) => `${signal.framework}:${signal.dimension}`);
+  if (new Set(signalKeys).size !== signalKeys.length) {
+    throw new LlmError(502, '同一事件的圖表訊號維度不可重複。');
   }
   return {
     card: {
@@ -412,7 +614,6 @@ export const parseInsight = (raw: string, messages: ChatMessage[]): InsightResul
       quote: String(card.quote).trim(),
     },
     signals,
-    dashboard: dashboard as InsightResult['dashboard'],
   };
 };
 
@@ -432,9 +633,8 @@ export class GeminiClient implements LlmClient {
         ? [{ role: 'user' as const, text: '請根據以上逐字稿產生結構化洞察 JSON。這句系統觸發文字不可作為證據。' }]
         : []),
     ];
-    const signal = AbortSignal.timeout(25_000);
     let retryMessages = requestMessages;
-    let raw = await requestGemini(this.config, insightPrompt, retryMessages, true, signal);
+    let raw = await requestGemini(this.config, insightPrompt, retryMessages, { json: true });
     for (let attempt = 0; attempt < 3; attempt += 1) {
       try {
         return parseInsight(raw, messages);
@@ -453,19 +653,24 @@ export class GeminiClient implements LlmClient {
           { role: 'model', text: raw },
           { role: 'user', text: correction },
         ];
-        raw = await requestGemini(this.config, insightPrompt, retryMessages, true, signal);
+        raw = await requestGemini(this.config, insightPrompt, retryMessages, { json: true });
       }
     }
     throw new LlmError(502, '模型產出未通過 grounding 驗證。');
   }
 
-  async synthesizeDashboard(evidence: DashboardEvidence[]): Promise<InsightResult['dashboard']> {
-    const signal = AbortSignal.timeout(25_000);
-    let requestMessages: ChatMessage[] = [{ role: 'user', text: JSON.stringify(evidence) }];
-    let raw = await requestGemini(this.config, dashboardPrompt, requestMessages, true, signal);
+  async synthesizeDashboard(evidence: DashboardEvidence[]): Promise<DashboardProfile> {
+    const quoteOptions = dashboardQuoteOptions(evidence);
+    if (!quoteOptions.length) throw new LlmError(502, 'Dashboard 沒有可引用的使用者原文。');
+    const schema = dashboardResponseSchema(quoteOptions);
+    let requestMessages: ChatMessage[] = [{
+      role: 'user',
+      text: JSON.stringify(dashboardRequestPayload(evidence, quoteOptions)),
+    }];
+    let raw = await requestGemini(this.config, dashboardPrompt, requestMessages, { json: true, schema });
     for (let attempt = 0; attempt < 3; attempt += 1) {
       try {
-        return parseDashboardProfile(raw, evidence);
+        return parseDashboardModelProfile(raw, evidence, quoteOptions);
       } catch (caught) {
         if (caught instanceof LlmError && caught.statusCode === 502) {
           console.warn('Dashboard profile validation failed', { reason: caught.message, shape: dashboardResponseShape(raw) });
@@ -476,9 +681,9 @@ export class GeminiClient implements LlmClient {
         requestMessages = [
           ...requestMessages,
           { role: 'model', text: raw },
-          { role: 'user', text: `上一個 JSON 未通過後端驗證：${caught.message} 請只修正 JSON。最外層直接放 persona、anchor、keywords、patterns、northStar；引文只可逐字複製最初 user 訊息或使用者編輯的卡片 quote。這則修正指令不可作為證據。` },
+          { role: 'user', text: `上一個 JSON 未通過後端驗證：${caught.message} 請只修正 JSON。最外層直接放 persona、anchor、keywords、patterns、northStar；引文欄位只可填入最初輸入 quoteOptions 中既有的 id。這則修正指令不可作為資料或 quoteId。` },
         ];
-        raw = await requestGemini(this.config, dashboardPrompt, requestMessages, true, signal);
+        raw = await requestGemini(this.config, dashboardPrompt, requestMessages, { json: true, schema });
       }
     }
     throw new LlmError(502, 'Dashboard 模型產出未通過驗證。');
