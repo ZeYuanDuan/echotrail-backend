@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 const baseUrl = process.env.API_BASE_URL?.replace(/\/$/, '') || 'http://127.0.0.1:8080';
 const iterations = Number(process.env.ITERATIONS || 5);
 const requestInterval = Number(process.env.REQUEST_INTERVAL_MS || 5_000);
@@ -10,12 +12,12 @@ const script = [
 type Message = { role: 'user' | 'model'; text: string };
 const wait = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
-const post = async (path: string, messages: Message[]) => {
+const post = async (path: string, payload: unknown) => {
   const startedAt = performance.now();
   const response = await fetch(`${baseUrl}${path}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ messages }),
+    body: JSON.stringify(payload),
   });
   const body = (await response.json()) as Record<string, unknown>;
   if (!response.ok) throw new Error(`${path} ${response.status}: ${String(body.error)}`);
@@ -23,21 +25,49 @@ const post = async (path: string, messages: Message[]) => {
 };
 
 const results: Array<{ iteration: number; duration: number; signals: number }> = [];
+const user = await post('/api/users', { name: `Gemini smoke ${randomUUID()}` });
+if (typeof user.body.id !== 'string') throw new Error('User response is missing id');
+
 for (let iteration = 1; iteration <= iterations; iteration += 1) {
   const messages: Message[] = [];
   let duration = 0;
   for (const text of script) {
     if (messages.length) await wait(requestInterval);
     messages.push({ role: 'user', text });
-    const chat = await post('/api/llm/chat', messages);
+    const chat = await post('/api/llm/chat', { messages });
     duration += chat.duration;
     if (typeof chat.body.text !== 'string') throw new Error('Chat response is missing text');
     messages.push({ role: 'model', text: chat.body.text });
   }
   await wait(requestInterval);
-  const insight = await post('/api/llm/insight', messages);
+  const insight = await post('/api/llm/insight', { messages });
   duration += insight.duration;
-  const signals = Array.isArray(insight.body.signals) ? insight.body.signals.length : 0;
+  if (
+    !insight.body.card ||
+    typeof insight.body.card !== 'object' ||
+    !Array.isArray(insight.body.signals)
+  ) {
+    throw new Error('Insight response is missing card or signals');
+  }
+  await wait(requestInterval);
+  const savedEvent = await post('/api/events', {
+    userId: user.body.id,
+    clientEventId: randomUUID(),
+    conversationId: randomUUID(),
+    messages,
+    card: insight.body.card,
+    editedFields: [],
+    signals: insight.body.signals,
+  });
+  duration += savedEvent.duration;
+  const dashboard = await post('/api/dashboard/rebuild', { userId: user.body.id });
+  duration += dashboard.duration;
+  const frameworks = dashboard.body.frameworks;
+  const evidence =
+    frameworks && typeof frameworks === 'object' && 'evidence' in frameworks
+      ? frameworks.evidence
+      : null;
+  const signals = Array.isArray(evidence) ? evidence.length : 0;
   results.push({ iteration, duration, signals });
   console.log(`run ${iteration}/${iterations}: ok, ${duration}ms, ${signals} grounded signals`);
   if (iteration < iterations) await wait(requestInterval);

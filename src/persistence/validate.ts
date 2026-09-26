@@ -42,11 +42,13 @@ export function parseEvent(body: unknown): ConfirmEventInput {
   const signals = body.signals.map((item): InsightSignal => {
     if (!isRecord(item) || !['riasec', 'disc', 'schein'].includes(String(item.framework)) || typeof item.dimension !== 'string' ||
       !dimensions[item.framework as keyof typeof dimensions].includes(item.dimension) || !Number.isInteger(item.strength) ||
-      (item.strength as number) < 1 || (item.strength as number) > 10 || !text(item.evidenceQuote) || !grounded(item.evidenceQuote)) {
+      (item.strength as number) < -10 || (item.strength as number) > 10 || item.strength === 0 || !text(item.evidenceQuote) || !grounded(item.evidenceQuote)) {
       throw new InputError('訊號缺少本次使用者原文證據。');
     }
     return { framework: item.framework as InsightSignal['framework'], dimension: item.dimension, strength: item.strength as number, evidenceQuote: item.evidenceQuote as string };
   });
+  const signalKeys = signals.map((signal) => `${signal.framework}:${signal.dimension}`);
+  if (new Set(signalKeys).size !== signalKeys.length) throw new InputError('同一事件的訊號維度不可重複。');
   return { userId, clientEventId, conversationId, messages, card: {
     title: (card.title as string).trim(), happen: (card.happen as string[]).map((item) => item.trim()), emotion: (card.emotion as string).trim(),
     like: (card.like as string).trim(), dislike: (card.dislike as string).trim(), value: (card.value as string).trim(), quote: (card.quote as string).trim(),

@@ -19,32 +19,6 @@ describe('LLM routes', () => {
         quote: '我很有成就感',
       },
       signals: [],
-      dashboard: {
-        persona: {
-          headline: '先理解問題再行動的人',
-          summaries: ['擅長拆解問題'],
-          quote: '我很有成就感',
-        },
-        anchor: {
-          primary: '專家達人',
-          ability: ['拆解問題'],
-          motivation: ['解決問題'],
-          values: ['先理解再行動'],
-        },
-        keywords: [
-          { text: '理解', weight: 5 },
-          { text: '問題', weight: 4 },
-          { text: '行動', weight: 3 },
-        ],
-        patterns: [{ title: '先釐清再行動', evidenceQuote: '我很有成就感' }],
-        northStar: {
-          primaryAnchor: '專家達人',
-          tagline: '用理解創造價值',
-          desires: ['解決真正問題'],
-          bottomLine: '不直接照單全收',
-          nextSteps: ['提早探索需求'],
-        },
-      },
     }),
   };
 
@@ -59,5 +33,7 @@ describe('LLM routes', () => {
     expect(chat.json().text).toContain('有成就感');
     expect(insight.statusCode).toBe(200);
     expect(insight.json().card.title).toBe('跨團隊推動成功');
+    expect(insight.json().signals).toEqual([]);
+    expect(insight.json()).not.toHaveProperty('dashboard');
   });
 });
