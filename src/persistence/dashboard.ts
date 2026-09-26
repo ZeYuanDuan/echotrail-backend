@@ -4,6 +4,7 @@ import { dimensions, parseDashboardProfile } from '../llm.js';
 import { getUserRevision, loadEvidence, saveDashboard } from './repository.js';
 import type { DashboardEvidence, DashboardFrameworks, DashboardSnapshot } from './types.js';
 import { InputError } from './validate.js';
+import { withCurrentCareerAnchorScores } from './scoring.js';
 
 export function aggregateSignals(events: DashboardEvidence[]): DashboardFrameworks {
   const scores: DashboardFrameworks['scores'] = { riasec: {}, disc: {}, schein: {} };
@@ -11,11 +12,16 @@ export function aggregateSignals(events: DashboardEvidence[]): DashboardFramewor
   for (const [framework, names] of Object.entries(dimensions) as Array<[keyof typeof dimensions, readonly string[]]>) {
     for (const dimension of names) {
       const matching = events.flatMap((event) => event.signals.filter((signal) => signal.framework === framework && signal.dimension === dimension));
-      scores[framework][dimension] = matching.length ? Math.max(0, Math.min(100, Math.round(matching.reduce((sum, signal) => sum + signal.strength, 0) / matching.length * 10))) : 0;
+      const total = matching.reduce((sum, signal) => sum + signal.strength, 0);
+      scores[framework][dimension] = framework === 'schein'
+        ? 0
+        : matching.length
+          ? Math.max(0, Math.min(100, Math.round(total / matching.length * 10)))
+          : 0;
     }
   }
   for (const event of events) for (const signal of event.signals) evidence.push({ eventId: event.eventId, eventTitle: event.title, ...signal });
-  return { scores, evidence };
+  return withCurrentCareerAnchorScores({ scores, evidence });
 }
 
 export async function rebuildDashboard(pool: Pool, llm: LlmClient, userId: string): Promise<DashboardSnapshot> {

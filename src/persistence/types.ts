@@ -32,6 +32,7 @@ export type DashboardEvidence = {
   quoteSource: 'user_message' | 'user_edit';
 };
 export type DashboardFrameworks = {
+  scoreVersion: number;
   scores: Record<'riasec' | 'disc' | 'schein', Record<string, number>>;
   evidence: Array<{ eventId: string; eventTitle: string; framework: string; dimension: string; strength: number; evidenceQuote: string }>;
 };

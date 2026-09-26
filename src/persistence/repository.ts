@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import type { Pool, PoolClient } from 'pg';
 import type { ConfirmEventInput, DashboardEvidence, DashboardSnapshot, EventRecord, User } from './types.js';
 import { InputError } from './validate.js';
+import { withCurrentCareerAnchorScores } from './scoring.js';
 
 export async function upsertUser(pool: Pool, display: string, normalized: string): Promise<User> {
   const { rows } = await pool.query('INSERT INTO users(id,display_name,normalized_name) VALUES($1,$2,$3) ON CONFLICT(normalized_name) DO UPDATE SET normalized_name=EXCLUDED.normalized_name RETURNING id,display_name', [randomUUID(), display, normalized]);
@@ -126,5 +127,7 @@ export async function getLatestDashboard(pool: Pool, userId: string): Promise<Da
   const { rows } = await pool.query('SELECT id,user_id,source_revision,source_event_count,result,created_at FROM dashboard_runs WHERE user_id=$1 ORDER BY id DESC LIMIT 1', [userId]);
   if (!rows.length) return null;
   const row = rows[0];
-  return { id: Number(row.id), userId: row.user_id, createdAt: (row.created_at as Date).toISOString(), sourceRevision: Number(row.source_revision), sourceEventCount: row.source_event_count, ...row.result };
+  const result = row.result as Pick<DashboardSnapshot, 'profile' | 'frameworks'>;
+  return { id: Number(row.id), userId: row.user_id, createdAt: (row.created_at as Date).toISOString(), sourceRevision: Number(row.source_revision), sourceEventCount: row.source_event_count,
+    profile: result.profile, frameworks: withCurrentCareerAnchorScores(result.frameworks) };
 }
