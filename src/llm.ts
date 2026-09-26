@@ -115,14 +115,16 @@ card 規則：
 - quote：必須逐字複製某一則 user 訊息中的連續片段，且至少 4 個文字或數字，空白與符號不計。
 
 signals 規則：
-- 只產生有逐字證據的訊號；不要求每個框架或維度都有資料。
-- framework=riasec 時 dimension 只能是 R/I/A/S/E/C。
-- framework=disc 時 dimension 只能是 D/I/S/C。
+- signals 只用於「職場北極星」，framework 一律為 schein。
+- 逐一檢視八個維度，只輸出有逐字證據的非零訊號；沒有足夠證據的維度省略，不得為了填滿圖表而猜測。
+- 同一事件可以同時影響多個維度。每個維度獨立評分，strength 代表事件對該錨點的支持或反向證據，不受同事件其他維度的分數影響。
+- 同一 framework + dimension 每個事件最多一筆；同維度有多段證據時，選最具代表性的逐字原句。
 - framework=schein 時 dimension 只能是 technical/managerial/autonomy/security/entrepreneurial/service/challenge/lifestyle。
-- strength 為 1 到 10 的整數。
+- strength 為 -10 到 10 的非零整數。正數代表支持該錨點，負數代表使用者明確不重視、排斥或事件與該錨點衝突；沒有方向性證據時省略，不輸出 0。
+- 絕對值 1～3 是間接或較弱訊號，4～6 是明確但非核心訊號，7～8 是強訊號，9～10 只用於使用者直接表達且事件高度支持或排斥的核心驅動。
 - evidenceQuote 必須逐字複製某一則 user 訊息中的連續片段，且至少 4 個文字或數字，空白與符號不計。
 
-輸出格式：{"card":{"title":"","happen":[""],"emotion":"","like":"","dislike":"","value":"","quote":""},"signals":[{"framework":"riasec","dimension":"I","strength":8,"evidenceQuote":""}]}`;
+輸出格式：{"card":{"title":"","happen":[""],"emotion":"","like":"","dislike":"","value":"","quote":""},"signals":[{"framework":"schein","dimension":"technical","strength":8,"evidenceQuote":""},{"framework":"schein","dimension":"security","strength":-5,"evidenceQuote":""}]}`;
 
 const dashboardLimits = {
   textListMinimum: 1,
@@ -135,7 +137,7 @@ const dashboardLimits = {
   patternsMaximum: 5,
 } as const;
 
-const dashboardPrompt = `你是 EchoTrail 的整體職涯洞察引擎。輸入包含使用者全部已確認事件，以及後端建立的 quoteOptions。只以這些資料綜合整體歷史，不捏造經歷。每個事件可能同時帶有多個獨立評分的 Schein 職涯錨點訊號；northStar.primaryAnchor 應優先依各錨點跨事件累加的 strength 判定，並用事件內容處理同分情況。
+const dashboardPrompt = `你是 EchoTrail 的整體職涯洞察引擎。輸入包含使用者全部已確認事件，以及後端建立的 quoteOptions。只以這些資料綜合整體歷史，不捏造經歷。每個事件可能同時帶有多個獨立評分的 Schein 職涯錨點正負訊號；northStar.primaryAnchor 應優先依各錨點跨事件的淨 strength 與證據量判定，並用事件內容處理同分情況。
 
 只輸出一個 JSON 物件，不要 Markdown，也不要包在 dashboard、card 或其他欄位下。格式與限制如下：
 {
@@ -573,8 +575,9 @@ export const parseInsight = (raw: string, messages: ChatMessage[]): InsightResul
       typeof item.dimension !== 'string' ||
       typeof item.strength !== 'number' ||
       !Number.isInteger(item.strength) ||
-      item.strength < 1 ||
+      item.strength < -10 ||
       item.strength > 10 ||
+      item.strength === 0 ||
       typeof item.evidenceQuote !== 'string'
     ) {
       throw new LlmError(502, `signals[${index}] 的欄位格式錯誤。`);

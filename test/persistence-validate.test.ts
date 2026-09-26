@@ -44,4 +44,38 @@ describe('event persistence validation', () => {
   it('rejects the former sequential numeric client event ID contract', () => {
     expect(() => parseEvent({ ...validEvent(), clientEventId: 1 })).toThrow(InputError);
   });
+
+  it('accepts signed evidence but rejects zero and out-of-range strengths', () => {
+    const input = validEvent();
+    input.signals = [{
+      framework: 'schein',
+      dimension: 'security',
+      strength: -6,
+      evidenceQuote: '喜歡釐清問題',
+    }];
+
+    expect(parseEvent(input).signals[0]?.strength).toBe(-6);
+    expect(() => parseEvent({ ...input, signals: [{ ...input.signals[0], strength: 0 }] })).toThrow(InputError);
+    expect(() => parseEvent({ ...input, signals: [{ ...input.signals[0], strength: 11 }] })).toThrow(InputError);
+  });
+
+  it('rejects duplicate dimensions within the same event', () => {
+    const input = validEvent();
+    input.signals = [
+      {
+        framework: 'schein',
+        dimension: 'technical',
+        strength: 8,
+        evidenceQuote: '喜歡釐清問題',
+      },
+      {
+        framework: 'schein',
+        dimension: 'technical',
+        strength: 4,
+        evidenceQuote: '我很有成就感',
+      },
+    ];
+
+    expect(() => parseEvent(input)).toThrow('同一事件的訊號維度不可重複');
+  });
 });

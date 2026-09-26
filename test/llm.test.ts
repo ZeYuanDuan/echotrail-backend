@@ -456,4 +456,42 @@ describe('LLM input and grounded output', () => {
     expect(prompt).toContain('不要用「聽到你說……」');
     expect(prompt).toContain('不得重複整句或大段改寫');
   });
+
+  it('asks Gemini to score every supported dimension independently for one event', async () => {
+    const raw = JSON.stringify({
+      card: {
+        title: '理解問題',
+        happen: ['完成一次需求探索'],
+        emotion: '有成就感',
+        like: '我在意理解問題',
+        dislike: '我不喜歡直接照單全收',
+        value: '先理解問題再行動',
+        quote: '我很有成就感',
+      },
+      signals: [
+        { framework: 'schein', dimension: 'technical', strength: 8, evidenceQuote: '我很有成就感' },
+        { framework: 'schein', dimension: 'security', strength: -5, evidenceQuote: '我很有成就感' },
+      ],
+    });
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ candidates: [{ content: { parts: [{ text: raw }] } }] }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await new GeminiClient({ apiKey: 'test-key', model: 'test-model' }).insight(messages);
+
+    expect(result.signals.filter((signal) => signal.framework === 'schein')).toHaveLength(2);
+    expect(result.signals[1]?.strength).toBe(-5);
+    const request = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as {
+      systemInstruction: { parts: Array<{ text: string }> };
+    };
+    const prompt = request.systemInstruction.parts[0]?.text ?? '';
+    expect(prompt).toContain('同一事件可以同時影響多個維度');
+    expect(prompt).toContain('每個維度獨立評分');
+    expect(prompt).toContain('逐一檢視八個維度');
+    expect(prompt).toContain('framework 一律為 schein');
+    expect(prompt).toContain('正數代表支持該錨點，負數代表');
+    expect(prompt).toContain('絕對值 1～3 是間接或較弱訊號');
+  });
 });
