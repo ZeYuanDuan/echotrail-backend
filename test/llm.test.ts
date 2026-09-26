@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { GeminiClient, LlmError, parseDashboardProfile, parseInsight, parseMessages } from '../src/llm.js';
 import type { DashboardEvidence } from '../src/persistence/types.js';
@@ -32,7 +33,7 @@ const dashboard = {
   },
 };
 const dashboardEvidence: DashboardEvidence[] = [{
-  eventId: 'event-1', title: '理解問題',
+  eventId: randomUUID(), title: '理解問題',
   card: { title: '理解問題', happen: ['完成需求探索'], emotion: '有成就感', like: '我在意理解問題',
     dislike: '我不喜歡盲目行動', value: '先理解再行動', quote: '我很有成就感' },
   messages, signals: [], quoteSource: 'user_message',

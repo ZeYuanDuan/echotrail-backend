@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 const baseUrl = process.env.API_BASE_URL?.replace(/\/$/, '') || 'http://127.0.0.1:8080';
 const iterations = Number(process.env.ITERATIONS || 5);
 const requestInterval = Number(process.env.REQUEST_INTERVAL_MS || 5_000);
@@ -23,6 +25,9 @@ const post = async (path: string, payload: unknown) => {
 };
 
 const results: Array<{ iteration: number; duration: number; signals: number }> = [];
+const user = await post('/api/users', { name: `Gemini smoke ${randomUUID()}` });
+if (typeof user.body.id !== 'string') throw new Error('User response is missing id');
+
 for (let iteration = 1; iteration <= iterations; iteration += 1) {
   const messages: Message[] = [];
   let duration = 0;
@@ -40,22 +45,29 @@ for (let iteration = 1; iteration <= iterations; iteration += 1) {
   if (
     !insight.body.card ||
     typeof insight.body.card !== 'object' ||
-    typeof insight.body.careerAnchorType !== 'string'
+    !Array.isArray(insight.body.signals)
   ) {
-    throw new Error('Insight response is missing card or careerAnchorType');
+    throw new Error('Insight response is missing card or signals');
   }
   await wait(requestInterval);
-  const dashboard = await post('/api/llm/dashboard', {
-    events: [
-      {
-        eventId: 1,
-        ...insight.body.card,
-        careerAnchorType: insight.body.careerAnchorType,
-      },
-    ],
+  const savedEvent = await post('/api/events', {
+    userId: user.body.id,
+    clientEventId: randomUUID(),
+    conversationId: randomUUID(),
+    messages,
+    card: insight.body.card,
+    editedFields: [],
+    signals: insight.body.signals,
   });
+  duration += savedEvent.duration;
+  const dashboard = await post('/api/dashboard/rebuild', { userId: user.body.id });
   duration += dashboard.duration;
-  const signals = Array.isArray(dashboard.body.signals) ? dashboard.body.signals.length : 0;
+  const frameworks = dashboard.body.frameworks;
+  const evidence =
+    frameworks && typeof frameworks === 'object' && 'evidence' in frameworks
+      ? frameworks.evidence
+      : null;
+  const signals = Array.isArray(evidence) ? evidence.length : 0;
   results.push({ iteration, duration, signals });
   console.log(`run ${iteration}/${iterations}: ok, ${duration}ms, ${signals} grounded signals`);
   if (iteration < iterations) await wait(requestInterval);
