@@ -626,7 +626,7 @@ export class GeminiClient implements LlmClient {
   async chat(messages: ChatMessage[]): Promise<{ text: string }> {
     const userTurns = messages.filter((message) => message.role === 'user').length;
     const prompt = userTurns <= 1 ? firstChatPrompt : userTurns <= 10 ? earlyChatPrompt : lateChatPrompt;
-    return { text: await requestGemini(this.config, prompt, messages) };
+    return { text: await requestGemini(this.config, prompt, messages, { signal: AbortSignal.timeout(50_000) }) };
   }
 
   async insight(messages: ChatMessage[]): Promise<InsightResult> {
