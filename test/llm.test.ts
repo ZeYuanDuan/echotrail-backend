@@ -64,6 +64,40 @@ describe('LLM input and grounded output', () => {
     ).toThrow(LlmError);
   });
 
+  it('allows a chat response after 25 seconds but aborts before the Hosting deadline', async () => {
+    vi.useFakeTimers();
+    let modelDelay = 26_000;
+    vi.spyOn(AbortSignal, 'timeout').mockImplementation((delay) => {
+      const controller = new AbortController();
+      setTimeout(() => controller.abort(new DOMException('Timed out', 'TimeoutError')), delay);
+      return controller.signal;
+    });
+    vi.stubGlobal('fetch', vi.fn((_url: string, options: RequestInit) => new Promise<Response>((resolve, reject) => {
+      const timer = setTimeout(() => resolve(new Response(JSON.stringify({
+        candidates: [{ content: { parts: [{ text: '我們先釐清這次疏漏讓你在意的點。' }] } }],
+      }), { status: 200 })), modelDelay);
+      options.signal?.addEventListener('abort', () => {
+        clearTimeout(timer);
+        reject(options.signal?.reason);
+      }, { once: true });
+    })));
+    try {
+      const outcome = new GeminiClient({ apiKey: 'test-key', model: 'test-model' }).chat(messages)
+        .then((value) => ({ value }), (error) => ({ error }));
+      await vi.advanceTimersByTimeAsync(26_000);
+      expect(await outcome).toEqual({ value: { text: '我們先釐清這次疏漏讓你在意的點。' } });
+
+      modelDelay = 59_000;
+      const lateOutcome = new GeminiClient({ apiKey: 'test-key', model: 'test-model' }).chat(messages)
+        .then((value) => ({ value }), (error) => ({ error }));
+      await vi.advanceTimersByTimeAsync(59_000);
+      expect(await lateOutcome).toMatchObject({ error: { statusCode: 504 } });
+    } finally {
+      vi.useRealTimers();
+      vi.restoreAllMocks();
+    }
+  });
+
   it('rejects an invented evidence quote', () => {
     const raw = JSON.stringify({
       card: {
