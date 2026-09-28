@@ -90,3 +90,17 @@
 - 僅將聊天模型呼叫 deadline 延至 50 秒；產卡與 Dashboard 的每次呼叫仍為 25 秒。前端聊天等待上限同步延至 58 秒，避免瀏覽器先中止，並維持在 Firebase Hosting 的 60 秒上限內。
 - 後端測試以第 26 秒模型回覆重現修正前 504、修正後成功，並確認第 59 秒的上游回覆會先被應用中止。前端測試以第 52 秒服務回覆重現修正前 Axios 逾時、修正後成功，並確認第 59 秒才抵達的回覆會在 Firebase Hosting 上限之前由前端逾時。兩者均使用 fake clock，不觸及真實 Gemini 或使用者資料。
 - 線上驗證待部署後補充；若 Gemini 在 50 秒仍無回應，需透過上游診斷再判斷服務或模型狀態。
+
+## 追加調查（2026-09-28 21:00～21:13，台灣時間）
+
+- 原本的 timeout 修正已併入 `dev` 並部署。Cloud Logging 此後仍有一次聊天 504，耗時 50.006 秒；另有多筆聊天 502，耗時約 0.18～20 秒。這證明延長 deadline 沒有解決線上服務故障。
+- 後端對 Gemini 除 429 外的所有非成功 HTTP 回應都轉成同一個 502 訊息，沒有留下上游狀態碼。因此單看舊日誌，無法還原每筆 502 的實際 Gemini 回應。
+- Cloud Run 最新 revision `echotrail-backend-00013-hpq` 仍將 `GEMINI_API_KEY` 綁定到 Secret `echotrail-gemini-api-key` 版本 1。版本 2 是使用者當晚新建的替代金鑰；舊金鑰未被停用。
+- 在不記錄金鑰及使用者資料的情況下，以版本 1 對 `gemini-3.5-flash-lite` 送出短測試請求，兩次均收到 HTTP 503 `UNAVAILABLE`（約 0.8～0.9 秒）。`gemini-3.5-flash` 和 `gemini-3.8-flash` 也回 503。`gemini-3.1-flash-lite` 的極短測試曾在約 23 秒成功，但用實際聊天 prompt 的備援驗證一次回 503，另一次原模型等滿 50 秒後 504，因此沒有把模型切換當成可靠修復。
+- Cloud Monitoring 顯示本專案新 API key 有 HTTP 402；直接以 Secret 版本 2 測試，也得到 402 `RESOURCE_EXHAUSTED`。官方 Gemini 錯誤文件將此組合列為 Prepay 額度用盡。專案雖已啟用 Cloud Billing，Gemini Prepay 餘額仍須由帳戶持有人在 AI Studio 確認／補足。在 402 消除前，不能將 Cloud Run 切至版本 2。
+
+### 結論與後續
+
+- 可確認的線上原因：舊金鑰可送到 Gemini，但目前 Gemini 對測試呼叫回 503，且有長時間不回應的情況；後端 25／50 秒 deadline 使未完成的呼叫呈現 504。無法從既有日誌證明最初 20:31 那幾筆 25 秒請求的上游最終結果，也不能斷言其服務端根因一定與現在的 503 相同。
+- 新金鑰不能立即替換：版本 2 回 402，需先處理 Gemini Prepay 額度。之後應先直接驗證版本 2 能正常生成，再更新 Cloud Run Secret 綁定並做真實聊天驗證。
+- 程式新增安全診斷日誌，只記錄 Gemini HTTP 狀態與白名單中的 API 狀態，不記錄金鑰、prompt 或模型回應。如此下一次 502 可在 Cloud Logging 區分 402、503 等原因。

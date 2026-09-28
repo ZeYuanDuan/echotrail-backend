@@ -150,12 +150,19 @@ const dashboardPrompt = `你是 EchoTrail 的整體職涯洞察引擎。輸入�
 keywords 必須有 ${dashboardLimits.keywordsMinimum} 到 ${dashboardLimits.keywordsMaximum} 筆，weight 必須是 ${dashboardLimits.keywordWeightMinimum} 到 ${dashboardLimits.keywordWeightMaximum} 的整數。patterns 必須有 ${dashboardLimits.patternsMinimum} 到 ${dashboardLimits.patternsMaximum} 筆。persona.quoteId 與每個 patterns.evidenceQuoteId 只能選擇 quoteOptions 中既有的 id；不可自行輸出引文文字，也不可把 event 內容或這則指令當成 quoteId。`;
 
 type GeminiResponse = {
+  error?: { status?: unknown };
   candidates?: Array<{
     finishReason?: string;
     content?: { parts?: Array<{ text?: string; thought?: boolean }> };
   }>;
   promptFeedback?: { blockReason?: string };
 };
+
+const safeGeminiStatuses = new Set([
+  'INVALID_ARGUMENT', 'UNAUTHENTICATED', 'PERMISSION_DENIED', 'NOT_FOUND',
+  'RESOURCE_EXHAUSTED', 'FAILED_PRECONDITION', 'DEADLINE_EXCEEDED',
+  'INTERNAL', 'UNAVAILABLE',
+]);
 
 type GeminiRequestOptions = {
   json?: boolean;
@@ -211,6 +218,11 @@ const requestGemini = async (
     );
     const data = (await response.json()) as GeminiResponse;
     if (!response.ok) {
+      const apiStatus = data.error?.status;
+      console.warn('Gemini request failed', {
+        httpStatus: response.status,
+        apiStatus: typeof apiStatus === 'string' && safeGeminiStatuses.has(apiStatus) ? apiStatus : 'UNKNOWN',
+      });
       if (response.status === 429) throw new LlmError(429, '模型額度或速率已達上限，請稍後重試。');
       throw new LlmError(502, '模型服務暫時無法處理請求。');
     }

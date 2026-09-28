@@ -98,6 +98,26 @@ describe('LLM input and grounded output', () => {
     }
   });
 
+  it('logs only safe Gemini error metadata for an upstream HTTP failure', async () => {
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      error: {
+        status: 'PERMISSION_DENIED',
+        message: 'private prompt and key must stay out of logs',
+        details: [{ secret: 'private credential' }],
+      },
+    }), { status: 403 })));
+
+    await expect(new GeminiClient({ apiKey: 'private credential', model: 'test-model' }).chat(messages))
+      .rejects.toMatchObject({ statusCode: 502 });
+    expect(warning).toHaveBeenCalledWith('Gemini request failed', {
+      httpStatus: 403,
+      apiStatus: 'PERMISSION_DENIED',
+    });
+    expect(JSON.stringify(warning.mock.calls)).not.toContain('private');
+    warning.mockRestore();
+  });
+
   it('rejects an invented evidence quote', () => {
     const raw = JSON.stringify({
       card: {
