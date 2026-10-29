@@ -1,0 +1,11 @@
+{
+  "name": "echotrail-budget-guard",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22 <23"
+  },
+  "scripts": {
+    "start": "node server.js"
+  }
+}
