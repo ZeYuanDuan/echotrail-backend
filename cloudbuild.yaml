@@ -39,9 +39,9 @@ steps:
       - --service-account
       - echotrail-backend-runtime@echotrail-dev-508500-k6.iam.gserviceaccount.com
       - --set-cloudsql-instances
-      - echotrail-dev-508500-k6:asia-east1:echotrail-postgres
+      - echotrail-dev-508500-k6:asia-east1:echotrail-pg
       - --set-env-vars
-      - PGHOST=/cloudsql/echotrail-dev-508500-k6:asia-east1:echotrail-postgres,PGPORT=5432,PGDATABASE=echotrail,PGUSER=echotrail_app
+      - PGHOST=/cloudsql/echotrail-dev-508500-k6:asia-east1:echotrail-pg,PGPORT=5432,PGDATABASE=echotrail,PGUSER=echotrail_app
       - --set-secrets
       - PGPASSWORD=echotrail-db-password:latest
       - --quiet
@@ -77,9 +77,9 @@ steps:
       - --execution-environment
       - gen2
       - --add-cloudsql-instances
-      - echotrail-dev-508500-k6:asia-east1:echotrail-postgres
+      - echotrail-dev-508500-k6:asia-east1:echotrail-pg
       - --update-env-vars
-      - PGHOST=/cloudsql/echotrail-dev-508500-k6:asia-east1:echotrail-postgres,PGPORT=5432,PGDATABASE=echotrail,PGUSER=echotrail_app
+      - PGHOST=/cloudsql/echotrail-dev-508500-k6:asia-east1:echotrail-pg,PGPORT=5432,PGDATABASE=echotrail,PGUSER=echotrail_app
       - --update-secrets
       - PGPASSWORD=echotrail-db-password:latest
       - --allow-unauthenticated
